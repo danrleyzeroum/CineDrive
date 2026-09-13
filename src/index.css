@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Android TV & Leanback focus enhancements */
+:focus-visible {
+  outline: none;
+}
+
+/* Hide scrollbars for TV horizontal carousels while allowing smooth remote navigation */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

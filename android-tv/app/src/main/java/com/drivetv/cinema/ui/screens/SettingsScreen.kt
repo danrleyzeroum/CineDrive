@@ -1,8 +1,14 @@
 package com.drivetv.cinema.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -20,10 +26,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.Text
 import com.drivetv.cinema.model.DriveAccount
 import com.drivetv.cinema.ui.theme.*
@@ -210,22 +219,42 @@ fun TvSaveButton(text: String, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.05f else 1.0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "save_btn_scale"
+    )
+
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isFocused) 12.dp else 0.dp,
+        label = "save_btn_shadow"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .scale(scale)
+            .shadow(
+                elevation = shadowElevation,
+                shape = RoundedCornerShape(12.dp),
+                spotColor = CinemaRoseBright
+            )
+            .clip(RoundedCornerShape(12.dp))
             .background(if (isFocused) Color.White else CinemaRose)
             .border(
-                2.dp,
-                if (isFocused) Color.White else Color.Transparent,
-                RoundedCornerShape(10.dp)
+                BorderStroke(
+                    if (isFocused) 2.5.dp else 1.dp,
+                    if (isFocused) Color.White else CinemaRoseBright
+                ),
+                RoundedCornerShape(12.dp)
             )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .padding(vertical = 12.dp),
+            .padding(vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(

@@ -20,6 +20,7 @@ export interface ScrapedMetadata {
   provider: 'tmdb' | 'cinemeta' | 'wikipedia' | 'anilist' | 'tvmaze' | 'curated';
   tmdbId?: string | number;
   imdbId?: string;
+  trailerKey?: string;
 }
 
 // Portuguese translations for common genre names
@@ -105,9 +106,9 @@ async function scrapeFromTMDb(
     const hit = data.results?.[0];
     if (!hit) return null;
 
-    // Fetch deep details with credits & certifications in pt-BR
+    // Fetch deep details with credits, certifications & trailers in pt-BR
     const detailRes = await fetch(
-      `https://api.themoviedb.org/3/${searchType}/${hit.id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,content_ratings,release_dates`
+      `https://api.themoviedb.org/3/${searchType}/${hit.id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,content_ratings,release_dates,videos`
     );
     const detail = detailRes.ok ? await detailRes.json() : hit;
 
@@ -123,6 +124,12 @@ async function scrapeFromTMDb(
         contentRating = brRelease.release_dates[0].certification;
       }
     }
+
+    // Extract official YouTube trailer
+    const trailer = detail.videos?.results?.find(
+      (v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
+    );
+    const trailerKey = trailer?.key;
 
     return {
       id: `tmdb-${hit.id}`,
@@ -140,6 +147,7 @@ async function scrapeFromTMDb(
       genres: detail.genres?.map((g: any) => g.name),
       contentRating,
       tagline: detail.tagline || undefined,
+      trailerKey,
       provider: 'tmdb',
     };
   } catch (err) {

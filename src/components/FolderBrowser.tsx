@@ -20,7 +20,7 @@ import {
   searchFoldersGlobally,
   findFoldersNamedMidia
 } from '../services/driveService';
-import { groupFilesIntoMediaItems, formatBytes } from '../services/mediaParser';
+import { groupFilesIntoMediaItems, formatBytes, isVideoFile } from '../services/mediaParser';
 
 interface FolderBrowserProps {
   accounts: DriveAccount[];
@@ -58,7 +58,7 @@ export default function FolderBrowser({ accounts, onPlayMedia, onSetSourceFolder
         fetchVideosFromDrive(currentAccount.accessToken, currentAccount.id, currentAccount.label, folderId),
       ]);
       setFolders(fetchedFolders);
-      setFiles(fetchedFiles);
+      setFiles(fetchedFiles.filter((f) => isVideoFile(f.name, f.mimeType)));
     } catch (err: any) {
       setError(err.message || 'Erro ao carregar conteúdo da pasta.');
     } finally {

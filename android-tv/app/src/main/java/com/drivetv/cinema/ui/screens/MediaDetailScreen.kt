@@ -1,8 +1,14 @@
 package com.drivetv.cinema.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -17,12 +23,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.drivetv.cinema.model.Episode
@@ -196,28 +205,50 @@ fun TvBigPlayButton(text: String, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.08f else 1.0f,
+        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        label = "play_btn_scale"
+    )
+
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isFocused) 16.dp else 2.dp,
+        label = "play_btn_shadow"
+    )
+
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .zIndex(if (isFocused) 5f else 1f)
+            .scale(scale)
+            .shadow(
+                elevation = shadowElevation,
+                shape = RoundedCornerShape(14.dp),
+                spotColor = CinemaRoseBright
+            )
+            .clip(RoundedCornerShape(14.dp))
             .background(if (isFocused) Color.White else CinemaRose)
             .border(
-                2.dp,
-                if (isFocused) Color.White else Color.Transparent,
-                RoundedCornerShape(12.dp)
+                BorderStroke(
+                    if (isFocused) 3.dp else 1.5.dp,
+                    if (isFocused) Color.White else CinemaRoseBright
+                ),
+                RoundedCornerShape(14.dp)
             )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+            .padding(horizontal = 26.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Icon(
             imageVector = Icons.Default.PlayArrow,
             contentDescription = null,
-            tint = if (isFocused) CinemaBlack else Color.White
+            tint = if (isFocused) CinemaBlack else Color.White,
+            modifier = Modifier.size(24.dp)
         )
         Text(
             text = text,
@@ -236,36 +267,57 @@ fun TvEpisodeItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.04f else 1.0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "ep_scale"
+    )
+
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isFocused) 10.dp else 0.dp,
+        label = "ep_shadow"
+    )
+
     Row(
         modifier = Modifier
-            .fillMaxWidth(0.9f)
-            .clip(RoundedCornerShape(10.dp))
+            .fillMaxWidth(0.92f)
+            .zIndex(if (isFocused) 5f else 1f)
+            .scale(scale)
+            .shadow(
+                elevation = shadowElevation,
+                shape = RoundedCornerShape(12.dp),
+                spotColor = CinemaRose
+            )
+            .clip(RoundedCornerShape(12.dp))
             .background(if (isFocused) Color.White else CinemaSurface)
             .border(
-                1.5.dp,
-                if (isFocused) Color.White else Color(0xFF27272A),
-                RoundedCornerShape(10.dp)
+                BorderStroke(
+                    if (isFocused) 2.5.dp else 1.dp,
+                    if (isFocused) Color.White else Color(0xFF27272A)
+                ),
+                RoundedCornerShape(12.dp)
             )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onPlay
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
                     .background(
                         if (isFocused) CinemaRose else Color(0xFF334155),
-                        RoundedCornerShape(6.dp)
+                        RoundedCornerShape(8.dp)
                     )
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = "S%02dE%02d".format(episode.seasonNumber, episode.episodeNumber),
@@ -278,15 +330,16 @@ fun TvEpisodeItem(
             Text(
                 text = episode.title,
                 color = if (isFocused) CinemaBlack else Color.White,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp
+                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
+                fontSize = 14.sp
             )
         }
 
         Icon(
             imageVector = Icons.Default.PlayArrow,
             contentDescription = "Reproduzir",
-            tint = if (isFocused) CinemaBlack else CinemaTextMuted
+            tint = if (isFocused) CinemaBlack else CinemaRoseBright,
+            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -296,18 +349,33 @@ fun TvNavBackButton(onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.10f else 1.0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "back_scale"
+    )
+
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .scale(scale)
+            .clip(RoundedCornerShape(10.dp))
             .background(if (isFocused) Color.White else CinemaSurface)
+            .border(
+                BorderStroke(
+                    if (isFocused) 2.dp else 1.dp,
+                    if (isFocused) Color.White else Color(0xFF27272A)
+                ),
+                RoundedCornerShape(10.dp)
+            )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Icon(
             imageVector = Icons.Default.ArrowBack,
@@ -318,7 +386,7 @@ fun TvNavBackButton(onClick: () -> Unit) {
         Text(
             text = "Voltar ao Catálogo",
             color = if (isFocused) CinemaBlack else CinemaTextMuted,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold
         )
     }

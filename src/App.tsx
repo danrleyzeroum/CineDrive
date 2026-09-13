@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Film,
   Tv,
@@ -10,10 +10,10 @@ import {
   CheckCircle2,
   Compass,
 } from 'lucide-react';
-import { DriveAccount, MediaItem, Episode, WatchProgress } from './types';
+import { DriveAccount, MediaItem, Episode, WatchProgress, DriveRawFile } from './types';
 import { signInWithGoogleDrive } from './services/firebase';
 import { fetchVideosFromDrive } from './services/driveService';
-import { groupFilesIntoMediaItems } from './services/mediaParser';
+import { groupFilesIntoMediaItems, isVideoFile, cleanMediaItemOfNonVideos } from './services/mediaParser';
 import {
   loadSavedAccounts,
   saveAccounts,
@@ -26,10 +26,24 @@ import {
 } from './services/storageService';
 import { CURATED_CATALOG, enrichMediaItemsSync } from './services/coverService';
 import { autoScrapeMediaItems } from './services/metadataScraper';
+import {
+  saveMediaMetadataToCloud,
+  batchSaveMediaMetadataToCloud,
+  loadAllCloudMetadata,
+  mergeItemsWithCloudMetadata,
+} from './services/cloudMetadataService';
+import {
+  subscribeToCloudWatchProgress,
+  syncCloudWatchProgress,
+  mergeWatchProgressLists,
+} from './services/cloudProgressService';
+import { backgroundSync } from './services/backgroundSyncService';
 
 import Header, { AppTab } from './components/Header';
 import DualHeroBanners from './components/DualHeroBanners';
+import CategoryHeroYouCine, { CategoryFilterType } from './components/CategoryHeroYouCine';
 import MediaCard from './components/MediaCard';
+import TvMediaRow from './components/TvMediaRow';
 import MediaModal from './components/MediaModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
 import DriveAccountsModal from './components/DriveAccountsModal';
@@ -39,16 +53,26 @@ import CoverEditorModal from './components/CoverEditorModal';
 import FolderSelectorModal from './components/FolderSelectorModal';
 import FixMatchModal from './components/FixMatchModal';
 import MetadataSettingsModal from './components/MetadataSettingsModal';
+import NetworkSettingsModal from './components/NetworkSettingsModal';
+import Top1BrasilBanner from './components/Top1BrasilBanner';
+import Top10ServerRow from './components/Top10ServerRow';
+import SettingsView from './components/SettingsView';
+import { useTvNavigation } from './hooks/useTvNavigation';
 
 export default function App() {
   const [accounts, setAccounts] = useState<DriveAccount[]>(() => loadSavedAccounts());
   const [mediaItems, setMediaItems] = useState<MediaItem[]>(() => {
     const cached = loadCachedMedia();
-    if (cached && cached.length > 0) {
-      return enrichMediaItemsSync(cached);
-    }
-    // Curated fallback matching user's requested layout (Fast X, Extraction 2, etc.)
-    return enrichMediaItemsSync(CURATED_CATALOG);
+    const source = cached && cached.length > 0 ? cached : CURATED_CATALOG;
+    const enriched = enrichMediaItemsSync(source);
+    const seen = new Set<string>();
+    return enriched
+      .map(cleanMediaItemOfNonVideos)
+      .filter((item): item is MediaItem => {
+        if (!item || !item.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
   });
   const [watchProgressList, setWatchProgressList] = useState<WatchProgress[]>(() => loadWatchProgress());
   const [favorites, setFavorites] = useState<string[]>(() => loadFavorites());
@@ -57,6 +81,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedAccountFilter, setSelectedAccountFilter] = useState<string | null>(null);
   const [selectedGenreFilter, setSelectedGenreFilter] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterType>('all');
+  const [categoryGenre, setCategoryGenre] = useState<string | null>(null);
 
   const [isAccountsModalOpen, setIsAccountsModalOpen] = useState<boolean>(false);
   const [folderSelectorAccount, setFolderSelectorAccount] = useState<DriveAccount | null>(null);
@@ -68,6 +94,7 @@ export default function App() {
   const [coverEditorItem, setCoverEditorItem] = useState<MediaItem | null>(null);
   const [fixMatchItem, setFixMatchItem] = useState<MediaItem | null>(null);
   const [isMetadataSettingsOpen, setIsMetadataSettingsOpen] = useState<boolean>(false);
+  const [isNetworkModalOpen, setIsNetworkModalOpen] = useState<boolean>(false);
   const [scrapingProgress, setScrapingProgress] = useState<{
     current: number;
     total: number;
@@ -77,12 +104,134 @@ export default function App() {
     media: MediaItem;
     episode?: Episode;
   } | null>(null);
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState<boolean>(false);
+
+  // Enable Android TV Remote D-Pad Navigation and back key support
+  useTvNavigation({
+    onBack: () => {
+      if (activePlayer) setActivePlayer(null);
+      else if (selectedMedia) setSelectedMedia(null);
+      else if (coverEditorItem) setCoverEditorItem(null);
+      else if (fixMatchItem) setFixMatchItem(null);
+      else if (isNetworkModalOpen) setIsNetworkModalOpen(false);
+      else if (isMetadataSettingsOpen) setIsMetadataSettingsOpen(false);
+      else if (isAccountsModalOpen) setIsAccountsModalOpen(false);
+      else if (currentTab !== 'all') setCurrentTab('all');
+    },
+    isEnabled: true,
+  });
+
+  // Synchronized refs to allow background sync loops to read fresh state without restarting timers
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+
+  const mediaItemsRef = useRef(mediaItems);
+  mediaItemsRef.current = mediaItems;
+
+  const activePlayerRef = useRef(activePlayer);
+  activePlayerRef.current = activePlayer;
 
   const showToast = (text: string, type: 'info' | 'error' | 'success' = 'info') => {
     setNotification({ text, type });
     setTimeout(() => {
       setNotification((prev) => (prev?.text === text ? null : prev));
     }, 4500);
+  };
+
+  // Restore cloud database metadata on initial app boot so no metadata is lost
+  useEffect(() => {
+    loadAllCloudMetadata()
+      .then((cloudMap) => {
+        if (cloudMap && cloudMap.size > 0) {
+          setMediaItems((current) => {
+            const { mergedItems, restoredCount } = mergeItemsWithCloudMetadata(current, cloudMap);
+            if (restoredCount > 0) {
+              saveCachedMedia(mergedItems);
+              return mergedItems;
+            }
+            return current;
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Aviso ao sincronizar metadados do Firestore:', err);
+      });
+  }, []);
+
+  // Real-time Watch Progress synchronization via Firebase Firestore across devices
+  useEffect(() => {
+    // 1. Initial bi-directional sync (local storage + Firestore)
+    syncCloudWatchProgress().then((merged) => {
+      if (merged && merged.length > 0) {
+        setWatchProgressList(merged);
+      }
+    });
+
+    // 2. Real-time subscription to cloud changes (when paused on TV, mobile or PC updates immediately)
+    const unsubscribe = subscribeToCloudWatchProgress((cloudList) => {
+      setWatchProgressList((localList) => {
+        return mergeWatchProgressLists(localList, cloudList);
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Background sync service: runs periodically without interrupting playback
+  useEffect(() => {
+    if (accounts.length === 0) {
+      backgroundSync.stop();
+      return;
+    }
+
+    backgroundSync.start(
+      () => accountsRef.current,
+      () => mediaItemsRef.current,
+      () => activePlayerRef.current !== null,
+      (updatedMedia, newFilesCount) => {
+        const sanitized = updatedMedia
+          .map(cleanMediaItemOfNonVideos)
+          .filter((item): item is MediaItem => item !== null);
+        setMediaItems(sanitized);
+        saveCachedMedia(sanitized);
+        if (newFilesCount > 0) {
+          showToast(
+            `🎬 Catálogo atualizado em segundo plano: +${newFilesCount} novo${newFilesCount > 1 ? 's' : ''} vídeo${newFilesCount > 1 ? 's' : ''} detectado${newFilesCount > 1 ? 's' : ''} no Drive!`,
+            'success'
+          );
+        }
+      }
+    );
+
+    return () => {
+      backgroundSync.stop();
+    };
+  }, [accounts.length]);
+
+  // Manual trigger for background sync check
+  const handleTriggerBackgroundSync = async () => {
+    if (accounts.length === 0) {
+      showToast('Conecte ao menos um Google Drive para sincronizar.', 'info');
+      return;
+    }
+    setIsBackgroundSyncing(true);
+    try {
+      const result = await backgroundSync.runSyncCheck(accounts, mediaItems, false);
+      if (result.hasChanges && result.newCount > 0) {
+        showToast(
+          `Sincronização concluída: +${result.newCount} novo${result.newCount > 1 ? 's' : ''} conteúdo${result.newCount > 1 ? 's' : ''} adicionado${result.newCount > 1 ? 's' : ''}!`,
+          'success'
+        );
+      } else {
+        showToast('Tudo atualizado! Nenhum novo arquivo encontrado no Google Drive.', 'info');
+      }
+    } catch (err: any) {
+      showToast(`Erro na sincronização: ${err.message}`, 'error');
+    } finally {
+      setIsBackgroundSyncing(false);
+    }
   };
 
   // Automated metadata scraper (Jellyfin / Plex / Emby pt-BR)
@@ -107,7 +256,11 @@ export default function App() {
 
       setMediaItems(scraped);
       saveCachedMedia(scraped);
-      showToast(`Scraper pt-BR: ${scraped.length} conteúdos enriquecidos com capas e sinopses!`, 'success');
+
+      // Persist enriched metadata to Firestore cloud database so it's permanent and takes 0 device storage!
+      batchSaveMediaMetadataToCloud(scraped);
+
+      showToast(`Scraper pt-BR: ${scraped.length} conteúdos enriquecidos e salvos na nuvem!`, 'success');
     } catch (err: any) {
       console.error('Erro no scraper de metadados:', err);
     } finally {
@@ -124,7 +277,7 @@ export default function App() {
     showToast('Buscando filmes e séries nas pastas selecionadas dos seus Drives...', 'info');
 
     try {
-      const allFiles = [];
+      const allFiles: DriveRawFile[] = [];
       const updatedAccounts = [...currentAccountsList];
 
       for (let i = 0; i < updatedAccounts.length; i++) {
@@ -141,7 +294,12 @@ export default function App() {
             ...acc,
             fileCount: files.length,
           };
-          allFiles.push(...files);
+          // Deduplicate files by id across drives/folders
+          for (const f of files) {
+            if (!allFiles.some((existing) => existing.id === f.id)) {
+              allFiles.push(f);
+            }
+          }
         } catch (err: any) {
           console.error(`Erro ao escanear conta ${acc.label}:`, err);
           showToast(`Erro ao ler ${acc.label}: ${err.message || 'Token expirado'}. Tente reconectar.`, 'error');
@@ -154,12 +312,32 @@ export default function App() {
       if (allFiles.length > 0) {
         const parsedItems = groupFilesIntoMediaItems(allFiles);
         const enrichedItems = enrichMediaItemsSync(parsedItems);
-        setMediaItems(enrichedItems);
-        saveCachedMedia(enrichedItems);
-        showToast(`Varredura concluída: ${enrichedItems.length} títulos unificados!`, 'success');
 
-        // Automatically fetch pt-BR metadata, posters, ratings & synopses (Jellyfin/Plex style)
-        runAutoScraper(enrichedItems);
+        // Merge with existing Cloud Firestore metadata so NO previous data (titles, covers, synopses, ratings) is lost!
+        const cloudMap = await loadAllCloudMetadata();
+        const { mergedItems, restoredCount } = mergeItemsWithCloudMetadata(enrichedItems, cloudMap);
+
+        // Strict deduplication of final merged items by item.id
+        const uniqueMerged: MediaItem[] = [];
+        const seenIds = new Set<string>();
+        for (const item of mergedItems) {
+          if (item && item.id && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            uniqueMerged.push(item);
+          }
+        }
+
+        setMediaItems(uniqueMerged);
+        saveCachedMedia(uniqueMerged);
+
+        if (restoredCount > 0) {
+          showToast(`Varredura concluída: ${uniqueMerged.length} títulos (${restoredCount} preservados da nuvem)!`, 'success');
+        } else {
+          showToast(`Varredura concluída: ${uniqueMerged.length} títulos unificados!`, 'success');
+        }
+
+        // Automatically fetch pt-BR metadata, posters, ratings & synopses for missing items
+        runAutoScraper(uniqueMerged);
       } else {
         showToast('Nenhum vídeo encontrado na(s) pasta(s) selecionada(s).', 'info');
       }
@@ -200,7 +378,7 @@ export default function App() {
     await handleSelectFolder(accountId, undefined, undefined);
   };
 
-  // Connect Drive 1 or Drive 2
+  // Connect Drive 1 or Drive 2 (Supports connecting the same Google account in both slots with different folders!)
   const handleConnectDrive = async (slotIndex: number) => {
     setIsConnecting(true);
     try {
@@ -209,9 +387,17 @@ export default function App() {
 
       const label = slotIndex === 0 ? 'Drive 1 (Principal)' : 'Drive 2 (Secundário)';
       const color = slotIndex === 0 ? 'blue' : 'purple';
+      const slotId = slotIndex === 0 ? `drive_slot_1_${user.uid}` : `drive_slot_2_${user.uid}`;
+
+      // Check if this specific slot was previously configured
+      const existingSlotIdx = accounts.findIndex(
+        (a) =>
+          a.id === slotId ||
+          (slotIndex === 0 ? a.label.includes('Drive 1') : a.label.includes('Drive 2'))
+      );
 
       const newAccount: DriveAccount = {
-        id: user.uid,
+        id: slotId,
         email: user.email || `drive${slotIndex + 1}@gmail.com`,
         name: user.displayName || `Drive ${slotIndex + 1}`,
         photoUrl: user.photoURL || undefined,
@@ -219,21 +405,16 @@ export default function App() {
         label,
         color,
         fileCount: 0,
+        selectedFolderId: existingSlotIdx >= 0 ? accounts[existingSlotIdx].selectedFolderId : undefined,
+        selectedFolderName: existingSlotIdx >= 0 ? accounts[existingSlotIdx].selectedFolderName : undefined,
       };
 
       const updated = [...accounts];
-      const existingIdx = updated.findIndex((a) => a.id === user.uid);
-      if (existingIdx >= 0) {
-        updated[existingIdx] = {
-          ...newAccount,
-          selectedFolderId: updated[existingIdx].selectedFolderId,
-          selectedFolderName: updated[existingIdx].selectedFolderName,
-        };
+      if (existingSlotIdx >= 0) {
+        updated[existingSlotIdx] = newAccount;
       } else {
-        if (slotIndex === 0 && updated[0]) {
-          updated[0] = newAccount;
-        } else if (slotIndex === 1 && updated[1]) {
-          updated[1] = newAccount;
+        if (slotIndex === 0) {
+          updated.unshift(newAccount);
         } else {
           updated.push(newAccount);
         }
@@ -302,7 +483,10 @@ export default function App() {
       setSelectedMedia(updatedItem);
     }
 
-    showToast(`Capa e banner de "${updatedItem.title}" atualizados!`, 'success');
+    // Persist to Cloud Database (Firestore)
+    saveMediaMetadataToCloud(updatedItem);
+
+    showToast(`Capa e banner de "${updatedItem.title}" atualizados e salvos na nuvem!`, 'success');
   };
 
   // Handle saving match from FixMatchModal (identificação manual / override)
@@ -317,7 +501,10 @@ export default function App() {
       setSelectedMedia(updatedItem);
     }
 
-    showToast(`Conteúdo identificado como "${updatedItem.title}" (${updatedItem.year || ''})!`, 'success');
+    // Persist to Cloud Database (Firestore)
+    saveMediaMetadataToCloud(updatedItem);
+
+    showToast(`Conteúdo identificado como "${updatedItem.title}" (${updatedItem.year || ''}) e salvo na nuvem!`, 'success');
   };
 
   // Handle re-scraping entire library
@@ -428,12 +615,106 @@ export default function App() {
       );
     }
 
-    return result;
+    // Deduplicate result by item.id
+    const seen = new Set<string>();
+    return result.filter((item) => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
   }, [mediaItems, currentTab, selectedAccountFilter, selectedGenreFilter, searchQuery, favorites]);
 
-  // Split movies & series for dual banners and lists
-  const moviesList = useMemo(() => mediaItems.filter((m) => m.type === 'movie'), [mediaItems]);
-  const seriesList = useMemo(() => mediaItems.filter((m) => m.type === 'series'), [mediaItems]);
+  // Split movies & series for dual banners and lists (Strictly deduplicated by id)
+  const moviesList = useMemo(() => {
+    const seen = new Set<string>();
+    return mediaItems.filter((m) => {
+      if (m.type !== 'movie' || !m.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [mediaItems]);
+
+  const seriesList = useMemo(() => {
+    const seen = new Set<string>();
+    return mediaItems.filter((m) => {
+      if (m.type !== 'series' || !m.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [mediaItems]);
+
+  const kidsList = useMemo(() => {
+    const seen = new Set<string>();
+    return mediaItems.filter((m) => {
+      if (!isKidsItem(m) || !m.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [mediaItems]);
+
+  const animeList = useMemo(() => {
+    const seen = new Set<string>();
+    return mediaItems.filter((m) => {
+      if (!isAnimeItem(m) || !m.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [mediaItems]);
+
+  // Active category items for FILMES / SÉRIES / KIDS / ANIME YouCine view
+  const activeCategoryItems = useMemo(() => {
+    if (currentTab === 'movies') return moviesList;
+    if (currentTab === 'series') return seriesList;
+    if (currentTab === 'kids') return kidsList;
+    if (currentTab === 'anime') return animeList;
+    return [];
+  }, [currentTab, moviesList, seriesList, kidsList, animeList]);
+
+  // Display items for the Category View based on active filter buttons
+  const displayCategoryItems = useMemo(() => {
+    let list = activeCategoryItems;
+
+    // Filter by drive origin if set
+    if (selectedAccountFilter) {
+      list = list.filter((item) =>
+        item.accounts.some((a) => a.accountId === selectedAccountFilter)
+      );
+    }
+
+    // Filter by search query if typed
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (item) =>
+          item.title.toLowerCase().includes(q) ||
+          item.cleanTitle.toLowerCase().includes(q) ||
+          item.genre?.some((g) => g.toLowerCase().includes(q))
+      );
+    }
+
+    // Filter by the 4 YouCine buttons:
+    if (categoryFilter === '2026') {
+      list = list.filter((item) => item.year === '2026');
+    } else if (categoryFilter === 'cinema') {
+      list = [...list].sort((a, b) => {
+        const ra = parseFloat(a.rating || '0') || 0;
+        const rb = parseFloat(b.rating || '0') || 0;
+        return rb - ra;
+      });
+    } else if (categoryFilter === 'genre' && categoryGenre) {
+      list = list.filter((item) =>
+        item.genre?.some((g) => g.toLowerCase() === categoryGenre.toLowerCase())
+      );
+    }
+
+    // Deduplicate displayCategoryItems by item.id
+    const seen = new Set<string>();
+    return list.filter((item) => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [activeCategoryItems, selectedAccountFilter, searchQuery, categoryFilter, categoryGenre]);
 
   // Continue watching list (media with watch progress)
   const continueWatchingItems = useMemo(() => {
@@ -471,22 +752,26 @@ export default function App() {
         onSelectTab={(tab) => {
           setCurrentTab(tab);
           setSelectedGenreFilter(null);
+          setCategoryFilter('all');
+          setCategoryGenre(null);
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         accounts={accounts}
         onOpenAccountsModal={() => setIsAccountsModalOpen(true)}
         isScanning={isScanning}
+        isBackgroundSyncing={isBackgroundSyncing}
         onRefresh={() => scanAllDrives()}
         selectedAccountFilter={selectedAccountFilter}
         onSelectAccountFilter={setSelectedAccountFilter}
         onOpenMetadataSettings={() => setIsMetadataSettingsOpen(true)}
+        onOpenNetworkSettings={() => setIsNetworkModalOpen(true)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Drive Accounts Status Banner if only 1 drive is connected */}
-        {accounts.length === 1 && (
+        {/* Drive Accounts Status Banner if only 1 drive is connected and not on settings tab */}
+        {accounts.length === 1 && currentTab !== 'settings' && (
           <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-neutral-900/60 to-neutral-900/40 border border-purple-800/40 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
@@ -503,7 +788,7 @@ export default function App() {
             </div>
             <button
               id="add-second-drive-banner-btn"
-              onClick={() => setIsAccountsModalOpen(true)}
+              onClick={() => setCurrentTab('settings')}
               className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-950 transition-all shrink-0"
             >
               + Conectar 2º Drive
@@ -511,8 +796,32 @@ export default function App() {
           </div>
         )}
 
-        {/* Folder Browser View */}
-        {currentTab === 'folders' ? (
+        {/* Settings View Tab */}
+        {currentTab === 'settings' ? (
+          <SettingsView
+            accounts={accounts}
+            onConnectDrive={handleConnectDrive}
+            onDisconnectDrive={handleDisconnectDrive}
+            onSyncDrive={handleSyncDrive}
+            onOpenFolderSelector={(account) => setFolderSelectorAccount(account)}
+            onClearFolder={handleClearFolder}
+            isConnecting={isConnecting}
+            isScanning={isScanning}
+            onScanAllDrives={() => scanAllDrives()}
+            selectedAccountFilter={selectedAccountFilter}
+            onSelectAccountFilter={setSelectedAccountFilter}
+            onTriggerFullRescrape={handleTriggerFullRescrape}
+            onTriggerBackgroundSync={handleTriggerBackgroundSync}
+            isBackgroundSyncing={isBackgroundSyncing}
+            onCacheCleared={() => {
+              setMediaItems(loadCachedMedia() || enrichMediaItemsSync(CURATED_CATALOG));
+              setWatchProgressList(loadWatchProgress());
+              showToast('Cache de dados limpo com sucesso!', 'success');
+            }}
+            onPlayMedia={handlePlayMovie}
+            onSetSourceFolder={handleSelectFolder}
+          />
+        ) : currentTab === 'folders' ? (
           <FolderBrowser
             accounts={accounts}
             onPlayMedia={handlePlayMovie}
@@ -532,12 +841,12 @@ export default function App() {
           <div className="space-y-10">
             {/* ========================================================================= */}
             {/* DUAL HERO BANNERS: 2 BANNERS (Filmes à esquerda, Séries à direita) */}
-            {/* Conforme o print enviado pelo usuário! */}
+            {/* Esquerda SEMPRE Filmes, Direita SEMPRE Séries (ou EM BREVE se 0 séries) */}
             {/* ========================================================================= */}
             {currentTab === 'all' && !searchQuery && (
               <DualHeroBanners
-                movies={moviesList.length > 0 ? moviesList : mediaItems}
-                series={seriesList.length > 0 ? seriesList : mediaItems}
+                movies={moviesList}
+                series={seriesList}
                 onPlay={(item) =>
                   item.type === 'movie'
                     ? handlePlayMovie(item)
@@ -553,36 +862,83 @@ export default function App() {
               />
             )}
 
+            {/* ========================================================================= */}
+            {/* TOP 1 DO BRASIL: Atualiza automaticamente quando o #1 do Brasil muda */}
+            {/* ========================================================================= */}
+            {currentTab === 'all' && !searchQuery && (
+              <Top1BrasilBanner
+                libraryItems={mediaItems}
+                onPlayMedia={(item) =>
+                  item.type === 'movie'
+                    ? handlePlayMovie(item)
+                    : item.seasons?.[0]?.episodes?.[0]
+                    ? handlePlayEpisode(item.seasons[0].episodes[0], item)
+                    : setSelectedMedia(item)
+                }
+                onOpenDetails={setSelectedMedia}
+                favorites={favorites}
+                onToggleFavorite={handleToggleFavorite}
+              />
+            )}
+
+            {/* ========================================================================= */}
+            {/* 1 - TOP 10 FILMES DO SERVIDOR */}
+            {/* ========================================================================= */}
+            {currentTab === 'all' && !searchQuery && moviesList.length > 0 && (
+              <Top10ServerRow
+                id="top-10-movies-server"
+                title="TOP 10 FILMES DO SERVIDOR"
+                type="movie"
+                items={moviesList}
+                onSelectMedia={setSelectedMedia}
+                onPlayMedia={handlePlayMovie}
+                favorites={favorites}
+                onToggleFavorite={handleToggleFavorite}
+              />
+            )}
+
+            {/* ========================================================================= */}
+            {/* 2 - TOP 10 SÉRIES DO SERVIDOR */}
+            {/* ========================================================================= */}
+            {currentTab === 'all' && !searchQuery && seriesList.length > 0 && (
+              <Top10ServerRow
+                id="top-10-series-server"
+                title="TOP 10 SÉRIES DO SERVIDOR"
+                type="series"
+                items={seriesList}
+                onSelectMedia={setSelectedMedia}
+                onPlayMedia={(m) =>
+                  m.seasons?.[0]?.episodes?.[0]
+                    ? handlePlayEpisode(m.seasons[0].episodes[0], m)
+                    : setSelectedMedia(m)
+                }
+                favorites={favorites}
+                onToggleFavorite={handleToggleFavorite}
+              />
+            )}
+
             {/* Continuar Assistindo (Continue Watching) */}
             {continueWatchingItems.length > 0 && !searchQuery && currentTab === 'all' && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-sm font-bold tracking-tight text-neutral-200">
-                  <Clock className="w-4 h-4 text-amber-400" />
-                  <span>Continuar Assistindo</span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                  {continueWatchingItems.slice(0, 6).map(({ media, progress }) => (
-                    <MediaCard
-                      key={`cw-${media.id}`}
-                      item={media}
-                      onSelect={setSelectedMedia}
-                      onPlay={(m) =>
-                        m.type === 'movie'
-                          ? handlePlayMovie(m)
-                          : m.seasons?.[0]?.episodes?.[0]
-                          ? handlePlayEpisode(m.seasons[0].episodes[0], m)
-                          : setSelectedMedia(m)
-                      }
-                      onOpenCoverEditor={setCoverEditorItem}
-                      onOpenFixMatch={setFixMatchItem}
-                      watchProgress={progress}
-                      isFavorite={favorites.includes(media.id)}
-                      onToggleFavorite={handleToggleFavorite}
-                    />
-                  ))}
-                </div>
-              </div>
+              <TvMediaRow
+                id="continue-watching"
+                title="Continuar Assistindo"
+                icon={Clock}
+                iconColor="text-amber-400"
+                items={continueWatchingItems.map((cw) => cw.media)}
+                badgeText={`${continueWatchingItems.length} em andamento`}
+                onSelectMedia={setSelectedMedia}
+                onPlayMedia={(m) =>
+                  m.type === 'movie'
+                    ? handlePlayMovie(m)
+                    : m.seasons?.[0]?.episodes?.[0]
+                    ? handlePlayEpisode(m.seasons[0].episodes[0], m)
+                    : setSelectedMedia(m)
+                }
+                onOpenCoverEditor={setCoverEditorItem}
+                onOpenFixMatch={setFixMatchItem}
+                favorites={favorites}
+                onToggleFavorite={handleToggleFavorite}
+              />
             )}
 
             {/* Explore Tab Categories & Genre Badges */}
@@ -625,156 +981,154 @@ export default function App() {
             )}
 
             {/* Section: Filmes */}
-            {(currentTab === 'all' || currentTab === 'movies' || currentTab === 'explore') && moviesList.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-neutral-100">
-                    <Film className="w-5 h-5 text-rose-500" />
-                    <span>Filmes ({moviesList.length})</span>
+            {currentTab === 'all' && moviesList.length > 0 && (
+              <TvMediaRow
+                id="filmes-tv-row"
+                title="Filmes"
+                icon={Film}
+                iconColor="text-rose-500"
+                items={moviesList}
+                badgeText={`${moviesList.length} títulos`}
+                actionText="Ver todos"
+                onActionClick={() => setCurrentTab('movies')}
+                onSelectMedia={setSelectedMedia}
+                onPlayMedia={handlePlayMovie}
+                onOpenCoverEditor={setCoverEditorItem}
+                onOpenFixMatch={setFixMatchItem}
+                favorites={favorites}
+                onToggleFavorite={handleToggleFavorite}
+              />
+            )}
+
+            {/* ========================================================================= */}
+            {/* CATEGORY VIEW: FILMES / SÉRIES / KIDS / ANIME (ESTILO YOUCINE DO PRINT)  */}
+            {/* ========================================================================= */}
+            {(currentTab === 'movies' || currentTab === 'series' || currentTab === 'kids' || currentTab === 'anime') && (
+              <div className="space-y-6">
+                {/* O Banner YouCine com Carrossel de Lançamentos 2026, 4 Botões e 2 Verticais */}
+                <CategoryHeroYouCine
+                  categoryType={currentTab}
+                  categoryTitle={
+                    currentTab === 'movies'
+                      ? 'Filmes'
+                      : currentTab === 'series'
+                      ? 'Séries'
+                      : currentTab === 'kids'
+                      ? 'Kids'
+                      : 'Anime'
+                  }
+                  items={activeCategoryItems}
+                  activeFilter={categoryFilter}
+                  onSelectFilter={setCategoryFilter}
+                  selectedGenre={categoryGenre}
+                  onSelectGenre={setCategoryGenre}
+                  onPlay={(item) =>
+                    item.type === 'movie'
+                      ? handlePlayMovie(item)
+                      : item.seasons?.[0]?.episodes?.[0]
+                      ? handlePlayEpisode(item.seasons[0].episodes[0], item)
+                      : setSelectedMedia(item)
+                  }
+                  onOpenDetails={setSelectedMedia}
+                  onOpenCoverEditor={setCoverEditorItem}
+                  onOpenFixMatch={setFixMatchItem}
+                  favorites={favorites}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+
+                {/* Grade de Conteúdos da Categoria com Título e Filtro Selecionado */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-neutral-100">
+                      {currentTab === 'movies' && <Film className="w-5 h-5 text-rose-500" />}
+                      {currentTab === 'series' && <Tv className="w-5 h-5 text-amber-400" />}
+                      {currentTab === 'kids' && (
+                        <span className="flex items-center gap-0.5">
+                          <span className="text-pink-500 font-extrabold">K</span>
+                          <span className="text-amber-400 font-extrabold">I</span>
+                          <span className="text-emerald-400 font-extrabold">D</span>
+                          <span className="text-sky-400 font-extrabold">S</span>
+                        </span>
+                      )}
+                      {currentTab === 'anime' && <Sparkles className="w-5 h-5 text-amber-400" />}
+                      <span>
+                        {categoryFilter === '2026'
+                          ? 'Lançamentos 2026'
+                          : categoryFilter === 'cinema'
+                          ? 'No Cinema / Em Alta'
+                          : categoryFilter === 'genre' && categoryGenre
+                          ? `Gênero: ${categoryGenre}`
+                          : `Todos os ${
+                              currentTab === 'movies'
+                                ? 'Filmes'
+                                : currentTab === 'series'
+                                ? 'Séries'
+                                : currentTab === 'kids'
+                                ? 'Títulos Infantis'
+                                : 'Animes'
+                            }`}
+                      </span>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400">
+                        {displayCategoryItems.length} títulos
+                      </span>
+                    </div>
+
+                    {categoryFilter !== 'all' && (
+                      <button
+                        onClick={() => {
+                          setCategoryFilter('all');
+                          setCategoryGenre(null);
+                        }}
+                        className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        Limpar Filtro (Ver Todos)
+                      </button>
+                    )}
                   </div>
-                  {currentTab === 'all' && moviesList.length > 6 && (
-                    <button
-                      onClick={() => setCurrentTab('movies')}
-                      className="text-xs font-semibold text-amber-400 hover:text-amber-300"
-                    >
-                      Ver todos &rarr;
-                    </button>
+
+                  {displayCategoryItems.length === 0 ? (
+                    <div className="py-16 text-center text-neutral-400 text-xs bg-neutral-900/40 rounded-2xl border border-neutral-800 p-8">
+                      <p className="font-semibold text-neutral-300 text-sm mb-2">
+                        Nenhum título encontrado para o filtro selecionado.
+                      </p>
+                      <p className="text-neutral-500 mb-4">
+                        {categoryFilter === '2026'
+                          ? 'Ainda não foram detectados títulos com ano 2026 nesta categoria.'
+                          : 'Tente selecionar o botão "Todos" para visualizar todo o catálogo.'}
+                      </p>
+                      <button
+                        onClick={() => {
+                          setCategoryFilter('all');
+                          setCategoryGenre(null);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-amber-500 text-black font-bold text-xs hover:bg-amber-400 transition-all"
+                      >
+                        Exibir Todos os Títulos
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4.5">
+                      {displayCategoryItems.map((item, idx) => (
+                        <MediaCard
+                          key={`${item.id}_cat_${idx}`}
+                          item={item}
+                          onSelect={setSelectedMedia}
+                          onPlay={(m) =>
+                            m.type === 'movie'
+                              ? handlePlayMovie(m)
+                              : m.seasons?.[0]?.episodes?.[0]
+                              ? handlePlayEpisode(m.seasons[0].episodes[0], m)
+                              : setSelectedMedia(m)
+                          }
+                          onOpenCoverEditor={setCoverEditorItem}
+                          onOpenFixMatch={setFixMatchItem}
+                          isFavorite={favorites.includes(item.id)}
+                          onToggleFavorite={handleToggleFavorite}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                  {(currentTab === 'all' ? moviesList.slice(0, 12) : filteredMedia.filter((m) => m.type === 'movie')).map((item) => (
-                    <MediaCard
-                      key={item.id}
-                      item={item}
-                      onSelect={setSelectedMedia}
-                      onPlay={handlePlayMovie}
-                      onOpenCoverEditor={setCoverEditorItem}
-                      onOpenFixMatch={setFixMatchItem}
-                      isFavorite={favorites.includes(item.id)}
-                      onToggleFavorite={handleToggleFavorite}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Section: Séries */}
-            {(currentTab === 'all' || currentTab === 'series' || currentTab === 'explore') && seriesList.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-neutral-100">
-                    <Tv className="w-5 h-5 text-amber-400" />
-                    <span>Séries ({seriesList.length})</span>
-                  </div>
-                  {currentTab === 'all' && seriesList.length > 6 && (
-                    <button
-                      onClick={() => setCurrentTab('series')}
-                      className="text-xs font-semibold text-amber-400 hover:text-amber-300"
-                    >
-                      Ver todas &rarr;
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                  {(currentTab === 'all' ? seriesList.slice(0, 12) : filteredMedia.filter((m) => m.type === 'series')).map((item) => (
-                    <MediaCard
-                      key={item.id}
-                      item={item}
-                      onSelect={setSelectedMedia}
-                      onPlay={(series) => {
-                        const firstEp = series.seasons?.[0]?.episodes?.[0];
-                        if (firstEp) {
-                          handlePlayEpisode(firstEp, series);
-                        } else {
-                          setSelectedMedia(series);
-                        }
-                      }}
-                      onOpenCoverEditor={setCoverEditorItem}
-                      onOpenFixMatch={setFixMatchItem}
-                      isFavorite={favorites.includes(item.id)}
-                      onToggleFavorite={handleToggleFavorite}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Kids Tab View */}
-            {currentTab === 'kids' && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-neutral-100">
-                  <span className="text-pink-500 font-extrabold">K</span>
-                  <span className="text-amber-400 font-extrabold">I</span>
-                  <span className="text-emerald-400 font-extrabold">D</span>
-                  <span className="text-sky-400 font-extrabold">S</span>
-                  <span className="text-sm font-normal text-neutral-400">({filteredMedia.length} títulos)</span>
-                </div>
-
-                {filteredMedia.length === 0 ? (
-                  <div className="py-16 text-center text-neutral-500 text-xs">
-                    Nenhum título infantil ou animação detectado nos drives no momento.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                    {filteredMedia.map((item) => (
-                      <MediaCard
-                        key={item.id}
-                        item={item}
-                        onSelect={setSelectedMedia}
-                        onPlay={(m) =>
-                          m.type === 'movie'
-                            ? handlePlayMovie(m)
-                            : m.seasons?.[0]?.episodes?.[0]
-                            ? handlePlayEpisode(m.seasons[0].episodes[0], m)
-                            : setSelectedMedia(m)
-                        }
-                        onOpenCoverEditor={setCoverEditorItem}
-                        onOpenFixMatch={setFixMatchItem}
-                        isFavorite={favorites.includes(item.id)}
-                        onToggleFavorite={handleToggleFavorite}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Anime Tab View */}
-            {currentTab === 'anime' && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-tight text-neutral-100">
-                  <Sparkles className="w-5 h-5 text-amber-400" />
-                  <span>Animes ({filteredMedia.length})</span>
-                </div>
-
-                {filteredMedia.length === 0 ? (
-                  <div className="py-16 text-center text-neutral-500 text-xs">
-                    Nenhum anime detectado nos drives no momento. Você pode renomear seus arquivos ou alterar capas manualmente.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                    {filteredMedia.map((item) => (
-                      <MediaCard
-                        key={item.id}
-                        item={item}
-                        onSelect={setSelectedMedia}
-                        onPlay={(m) =>
-                          m.type === 'movie'
-                            ? handlePlayMovie(m)
-                            : m.seasons?.[0]?.episodes?.[0]
-                            ? handlePlayEpisode(m.seasons[0].episodes[0], m)
-                            : setSelectedMedia(m)
-                        }
-                        onOpenCoverEditor={setCoverEditorItem}
-                        onOpenFixMatch={setFixMatchItem}
-                        isFavorite={favorites.includes(item.id)}
-                        onToggleFavorite={handleToggleFavorite}
-                      />
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -792,9 +1146,9 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
-                    {filteredMedia.map((item) => (
+                    {filteredMedia.map((item, idx) => (
                       <MediaCard
-                        key={item.id}
+                        key={`${item.id}_fav_${idx}`}
                         item={item}
                         onSelect={setSelectedMedia}
                         onPlay={(m) =>
@@ -885,6 +1239,19 @@ export default function App() {
         isOpen={isMetadataSettingsOpen}
         onClose={() => setIsMetadataSettingsOpen(false)}
         onTriggerFullRescrape={handleTriggerFullRescrape}
+        onTriggerBackgroundSync={handleTriggerBackgroundSync}
+        isBackgroundSyncing={isBackgroundSyncing}
+      />
+
+      {/* TV Network & Cache Settings Modal */}
+      <NetworkSettingsModal
+        isOpen={isNetworkModalOpen}
+        onClose={() => setIsNetworkModalOpen(false)}
+        onCacheCleared={() => {
+          setMediaItems(loadCachedMedia() || enrichMediaItemsSync(CURATED_CATALOG));
+          setWatchProgressList(loadWatchProgress());
+          showToast('Cache de dados limpo com sucesso!', 'success');
+        }}
       />
 
       {/* Floating Scraper Progress Widget (Like Jellyfin & Plex Library Scan) */}
@@ -928,6 +1295,13 @@ export default function App() {
           media={activePlayer.media}
           episode={activePlayer.episode}
           accounts={accounts}
+          initialProgress={
+            watchProgressList.find(
+              (p) =>
+                p.fileId ===
+                (activePlayer.episode ? activePlayer.episode.fileId : activePlayer.media.movieFile?.id)
+            ) || watchProgressList.find((p) => p.mediaId === activePlayer.media.id)
+          }
           onClose={() => {
             setActivePlayer(null);
             setWatchProgressList(loadWatchProgress());

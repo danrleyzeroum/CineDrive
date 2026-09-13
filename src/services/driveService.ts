@@ -1,5 +1,6 @@
 import { DriveRawFile, DriveFolder } from '../types';
 import { decodeSubtitleBuffer } from './subtitleService';
+import { isVideoFile } from './mediaParser';
 
 /**
  * Traverses subfolders under rootFolderId to collect all descendant folder IDs,
@@ -96,11 +97,13 @@ export async function fetchVideosFromDrive(
       }
 
       const data = await response.json();
-      const files: DriveRawFile[] = (data.files || []).map((file: any) => ({
+      const rawBatch: DriveRawFile[] = (data.files || []).map((file: any) => ({
         ...file,
         accountId,
         accountLabel,
       }));
+      // Strictly filter only genuine video files (.mkv, .mp4, .avi, etc.), purging .nfo, .txt, subtitles, etc.
+      const files: DriveRawFile[] = rawBatch.filter((file) => isVideoFile(file.name, file.mimeType));
 
       for (const file of files) {
         if (!allFiles.some((existing) => existing.id === file.id)) {
@@ -167,11 +170,13 @@ export async function fetchVideosFromDrive(
       }
 
       const data = await response.json();
-      const files: DriveRawFile[] = (data.files || []).map((file: any) => ({
+      const rawBatch: DriveRawFile[] = (data.files || []).map((file: any) => ({
         ...file,
         accountId,
         accountLabel,
       }));
+      // Strictly filter only genuine video files (.mkv, .mp4, .avi, etc.), purging .nfo, .txt, subtitles, etc.
+      const files: DriveRawFile[] = rawBatch.filter((file) => isVideoFile(file.name, file.mimeType));
 
       allFiles.push(...files);
       if (onProgress) {

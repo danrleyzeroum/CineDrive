@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Film, Tv, Search, HardDrive, RefreshCw, X, FolderKanban, Bookmark, Sparkles, Compass } from 'lucide-react';
+import { Film, Search, RefreshCw, X, Bookmark, Settings, HardDrive } from 'lucide-react';
 import { DriveAccount } from '../types';
 
-export type AppTab = 'all' | 'movies' | 'series' | 'kids' | 'anime' | 'explore' | 'favorites' | 'folders';
+export type AppTab = 'all' | 'movies' | 'series' | 'kids' | 'anime' | 'explore' | 'favorites' | 'folders' | 'settings';
 
 interface HeaderProps {
   currentTab: AppTab;
@@ -12,10 +12,12 @@ interface HeaderProps {
   accounts: DriveAccount[];
   onOpenAccountsModal: () => void;
   isScanning: boolean;
+  isBackgroundSyncing?: boolean;
   onRefresh: () => void;
   selectedAccountFilter: string | null; // null for all, or accountId
   onSelectAccountFilter: (accountId: string | null) => void;
   onOpenMetadataSettings?: () => void;
+  onOpenNetworkSettings?: () => void;
 }
 
 export default function Header({
@@ -26,10 +28,12 @@ export default function Header({
   accounts,
   onOpenAccountsModal,
   isScanning,
+  isBackgroundSyncing = false,
   onRefresh,
   selectedAccountFilter,
   onSelectAccountFilter,
   onOpenMetadataSettings,
+  onOpenNetworkSettings,
 }: HeaderProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -50,7 +54,8 @@ export default function Header({
             </div>
             <div className="flex flex-col">
               <span className="text-base sm:text-lg font-black tracking-tight text-neutral-100 flex items-center">
-                DRIVE<span className="text-rose-500">CINEMA</span>
+                YOU<span className="text-amber-400">CINE</span>
+                <span className="text-[9px] font-bold text-rose-400 ml-1.5 px-1 py-0.5 rounded bg-rose-950/60 border border-rose-800/40">DRIVE</span>
               </span>
               <span className="text-[9px] uppercase font-bold tracking-wider text-neutral-400 -mt-1 hidden sm:block">
                 2 Drives Unificados
@@ -61,14 +66,14 @@ export default function Header({
 
         {/* Center: Navigation Bar matching the user's screenshot! */}
         <nav className="hidden md:flex items-center gap-1.5 lg:gap-3">
-          {/* INICIO (Pill with golden/amber border as in the print) */}
+          {/* INICIO */}
           <button
             id="tab-all"
             onClick={() => onSelectTab('all')}
-            className={`px-4 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`relative py-1.5 px-3 rounded-full text-xs lg:text-sm font-bold tracking-wider uppercase transition-all focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'all'
-                ? 'border border-amber-400 text-white bg-neutral-900/80 shadow-md shadow-amber-500/10 scale-105'
-                : 'text-neutral-400 hover:text-white hover:bg-neutral-900/50'
+                ? 'text-white font-extrabold bg-neutral-900/90 border border-amber-400/80 shadow-[0_0_12px_rgba(251,191,36,0.3)]'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-900/40 border border-transparent'
             }`}
           >
             INICIO
@@ -78,113 +83,136 @@ export default function Header({
           <button
             id="tab-movies"
             onClick={() => onSelectTab('movies')}
-            className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`relative py-1.5 px-3 text-xs lg:text-sm font-bold tracking-wider uppercase transition-all focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'movies'
-                ? 'border border-amber-400 text-white bg-neutral-900/80 shadow-md scale-105'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-900/40'
+                ? 'text-white font-black'
+                : 'text-neutral-300 hover:text-white'
             }`}
           >
             FILMES
+            {currentTab === 'movies' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
 
           {/* SÉRIES */}
           <button
             id="tab-series"
             onClick={() => onSelectTab('series')}
-            className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`relative py-1.5 px-3 text-xs lg:text-sm font-bold tracking-wider uppercase transition-all focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'series'
-                ? 'border border-amber-400 text-white bg-neutral-900/80 shadow-md scale-105'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-900/40'
+                ? 'text-white font-black'
+                : 'text-neutral-300 hover:text-white'
             }`}
           >
             SÉRIES
+            {currentTab === 'series' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
 
           {/* KIDS (Fun cartoon colored letters from the screenshot!) */}
           <button
             id="tab-kids"
             onClick={() => onSelectTab('kids')}
-            className={`px-3 py-1 rounded-full text-xs font-black tracking-wider uppercase transition-all flex items-center gap-0.5 ${
+            className={`relative py-1.5 px-3 text-xs lg:text-sm font-black tracking-wider uppercase transition-all flex items-center gap-0.5 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'kids'
-                ? 'border border-amber-400 bg-neutral-900/80 shadow-md scale-105'
-                : 'hover:bg-neutral-900/40'
+                ? 'scale-105'
+                : 'hover:opacity-90'
             }`}
           >
             <span className="text-pink-500 font-extrabold">K</span>
             <span className="text-amber-400 font-extrabold">I</span>
             <span className="text-emerald-400 font-extrabold">D</span>
             <span className="text-sky-400 font-extrabold">S</span>
+            {currentTab === 'kids' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
 
           {/* ANIME */}
           <button
             id="tab-anime"
             onClick={() => onSelectTab('anime')}
-            className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`relative py-1.5 px-3 text-xs lg:text-sm font-bold tracking-wider uppercase transition-all focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'anime'
-                ? 'border border-amber-400 text-white bg-neutral-900/80 shadow-md scale-105'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-900/40'
+                ? 'text-white font-black'
+                : 'text-neutral-300 hover:text-white'
             }`}
           >
             ANIME
+            {currentTab === 'anime' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
 
           {/* EXPLORAR */}
           <button
             id="tab-explore"
             onClick={() => onSelectTab('explore')}
-            className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase transition-all ${
+            className={`relative py-1.5 px-3 text-xs lg:text-sm font-bold tracking-wider uppercase transition-all focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'explore'
-                ? 'border border-amber-400 text-white bg-neutral-900/80 shadow-md scale-105'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-900/40'
+                ? 'text-white font-black'
+                : 'text-neutral-300 hover:text-white'
             }`}
           >
             EXPLORAR
-          </button>
-
-          {/* PASTAS DO DRIVE */}
-          <button
-            id="tab-folders"
-            onClick={() => onSelectTab('folders')}
-            className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
-              currentTab === 'folders'
-                ? 'bg-neutral-800 text-rose-400 border border-neutral-700'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-            title="Navegar por Pastas"
-          >
-            <FolderKanban className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Pastas</span>
+            {currentTab === 'explore' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
 
           {/* MINHA LISTA */}
           <button
             id="tab-favorites"
             onClick={() => onSelectTab('favorites')}
-            className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1 transition-all ${
+            className={`relative py-1.5 px-3 rounded-full text-xs lg:text-sm font-bold tracking-wider uppercase transition-all flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
               currentTab === 'favorites'
-                ? 'bg-neutral-800 text-rose-400 border border-neutral-700'
-                : 'text-neutral-400 hover:text-white'
+                ? 'text-white font-extrabold bg-neutral-900/90 border border-amber-400/80 shadow-[0_0_12px_rgba(251,191,36,0.3)]'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-900/40 border border-transparent'
             }`}
             title="Minha Lista de Favoritos"
           >
-            <Bookmark className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Minha Lista</span>
+            <Bookmark className="w-3.5 h-3.5 text-rose-500" />
+            <span>MINHA LISTA</span>
+            {currentTab === 'favorites' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
+          </button>
+
+          {/* ABA CONFIGURAÇÕES (Centraliza Drives, Scraper pt-BR, Nuvem, Rede e Pastas) */}
+          <button
+            id="tab-settings"
+            onClick={() => onSelectTab('settings')}
+            className={`relative py-1.5 px-3 rounded-full text-xs lg:text-sm font-bold tracking-wider uppercase transition-all flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
+              currentTab === 'settings'
+                ? 'text-white font-extrabold bg-neutral-900/90 border border-amber-400/80 shadow-[0_0_12px_rgba(251,191,36,0.3)]'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-900/40 border border-transparent'
+            }`}
+            title="Aba de Configurações do Sistema"
+          >
+            <Settings className="w-3.5 h-3.5 text-amber-400" />
+            <span>CONFIGURAÇÕES</span>
+            {currentTab === 'settings' && (
+              <span className="absolute -bottom-1.5 left-2 right-2 h-[3px] bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
+            )}
           </button>
         </nav>
 
-        {/* Right: Search, Drive Filter & Accounts */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* Right: Search Box & Sync (Clean & Minimalist - Never overflows) */}
+        <div className="flex items-center gap-2 shrink-0">
           {/* Search Box */}
           <div className="relative">
-            <div className={`flex items-center bg-neutral-900/90 border border-neutral-800 rounded-xl px-2.5 sm:px-3 py-1.5 transition-all ${
-              isSearchOpen ? 'w-44 sm:w-56 ring-1 ring-amber-400/60' : 'w-32 sm:w-44'
-            }`}>
+            <div
+              className={`flex items-center bg-neutral-900/90 border border-neutral-800 rounded-xl px-2.5 py-1.5 transition-all ${
+                isSearchOpen ? 'w-36 sm:w-48 ring-1 ring-amber-400/60' : 'w-28 sm:w-36'
+              }`}
+            >
               <Search className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
               <input
                 id="search-input"
                 type="text"
-                placeholder="Buscar títulos..."
+                placeholder="Buscar..."
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
                 onFocus={() => setIsSearchOpen(true)}
@@ -203,103 +231,21 @@ export default function Header({
             </div>
           </div>
 
-          {/* Drive Source Filter Pills (if 2 accounts connected) */}
-          {accounts.length > 1 && (
-            <div className="hidden lg:flex items-center gap-1 bg-neutral-900/80 p-0.5 rounded-lg border border-neutral-800 text-[11px]">
-              <button
-                id="filter-all-drives"
-                onClick={() => onSelectAccountFilter(null)}
-                className={`px-2 py-1 rounded font-medium transition-all ${
-                  selectedAccountFilter === null
-                    ? 'bg-neutral-700 text-white'
-                    : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                Ambos
-              </button>
-              {accounts.map((acc, index) => (
-                <button
-                  key={acc.id}
-                  id={`filter-drive-${index}`}
-                  onClick={() => onSelectAccountFilter(acc.id)}
-                  className={`px-2 py-1 rounded font-medium flex items-center gap-1 transition-all ${
-                    selectedAccountFilter === acc.id
-                      ? index === 0
-                        ? 'bg-blue-600/80 text-white'
-                        : 'bg-purple-600/80 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${index === 0 ? 'bg-blue-400' : 'bg-purple-400'}`} />
-                  {index === 0 ? 'Drive 1' : 'Drive 2'}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Metadata / Scrapers Button (Jellyfin/Plex style) */}
-          {onOpenMetadataSettings && (
-            <button
-              id="metadata-settings-btn"
-              onClick={onOpenMetadataSettings}
-              title="Configurações de Metadados & Scrapers (TMDb pt-BR)"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-all text-xs shrink-0"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-rose-500" />
-              <span className="hidden lg:inline text-[11px] font-semibold">Scraper pt-BR</span>
-            </button>
-          )}
-
-          {/* Sync / Refresh Button */}
+          {/* Quick Refresh Icon */}
           <button
             id="refresh-drives-btn"
             onClick={onRefresh}
             disabled={isScanning || accounts.length === 0}
-            title="Sincronizar arquivos do Google Drive"
-            className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white disabled:opacity-40 transition-colors shrink-0"
+            title={isScanning ? 'Escaneando biblioteca...' : 'Sincronizar Google Drive'}
+            className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white disabled:opacity-40 transition-all shrink-0"
           >
-            <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin text-amber-400' : ''}`} />
-          </button>
-
-          {/* Drives Status / Accounts Button */}
-          <button
-            id="drives-manager-btn"
-            onClick={onOpenAccountsModal}
-            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800/90 border border-neutral-800 text-neutral-200 transition-all hover:border-neutral-700 shrink-0"
-          >
-            <HardDrive className="w-4 h-4 text-rose-500 shrink-0" />
-            <div className="flex flex-col text-left hidden sm:flex">
-              <span className="text-[11px] font-bold leading-tight text-neutral-200">
-                {accounts.length === 0
-                  ? 'Conectar Drives'
-                  : accounts.length === 1
-                  ? '1/2 Drive Ativo'
-                  : '2/2 Drives Ativos'}
-              </span>
-              <span className="text-[9px] text-neutral-400 leading-tight">
-                {totalFiles > 0 ? `${totalFiles} vídeos` : 'Gerenciar'}
-              </span>
-            </div>
-            <div className="flex -space-x-1">
-              <div
-                className={`w-2 h-2 rounded-full border border-neutral-950 ${
-                  accounts[0] ? 'bg-blue-400 ring-2 ring-blue-500/20' : 'bg-neutral-700'
-                }`}
-                title="Drive 1"
-              />
-              <div
-                className={`w-2 h-2 rounded-full border border-neutral-950 ${
-                  accounts[1] ? 'bg-purple-400 ring-2 ring-purple-500/20' : 'bg-neutral-700'
-                }`}
-                title="Drive 2"
-              />
-            </div>
+            <RefreshCw className={`w-3.5 h-3.5 ${isScanning || isBackgroundSyncing ? 'animate-spin text-amber-400' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Mobile TV Navigation Bar */}
-      <div className="md:hidden flex items-center justify-between overflow-x-auto border-t border-neutral-800/50 bg-neutral-950/95 px-3 py-2 text-xs gap-1.5">
+      <div className="md:hidden flex items-center justify-start overflow-x-auto border-t border-neutral-800/50 bg-neutral-950/95 px-3 py-2 text-xs gap-1.5 scrollbar-none">
         <button
           onClick={() => onSelectTab('all')}
           className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase shrink-0 ${
@@ -358,6 +304,15 @@ export default function Header({
           }`}
         >
           LISTA
+        </button>
+        <button
+          onClick={() => onSelectTab('settings')}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase shrink-0 flex items-center gap-1 ${
+            currentTab === 'settings' ? 'border border-amber-400 text-white bg-neutral-900' : 'text-neutral-400'
+          }`}
+        >
+          <Settings className="w-3 h-3 text-amber-400" />
+          CONFIG
         </button>
       </div>
     </header>

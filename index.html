@@ -9,6 +9,42 @@
     <meta property="og:description" content="Aplicativo de streaming e catálogo unificado de filmes e séries do Google Drive com busca automática de capas, sinopses e detalhes em português brasileiro." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+          var customFetch = nativeFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return customFetch || nativeFetch;
+            },
+            set: function(fn) {
+              customFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          try {
+            var proto = Window.prototype;
+            var desc = Object.getOwnPropertyDescriptor(proto, 'fetch');
+            if (desc && !desc.set) {
+              var originalGet = desc.get;
+              Object.defineProperty(proto, 'fetch', {
+                get: function() {
+                  return this._customFetch || originalGet.call(this);
+                },
+                set: function(val) {
+                  this._customFetch = val;
+                },
+                configurable: true,
+                enumerable: true
+              });
+            }
+          } catch (e2) {}
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

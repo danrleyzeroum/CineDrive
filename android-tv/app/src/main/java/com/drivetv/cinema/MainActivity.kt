@@ -148,6 +148,39 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Periodic Background Sync: checks for new files in Google Drive every 15 minutes
+                // without interrupting active video playback on the TV screen
+                LaunchedEffect(accounts) {
+                    while (true) {
+                        kotlinx.coroutines.delay(15 * 60 * 1000L) // 15 min interval
+                        val hasValidAccounts = accounts.any { it.accessToken.isNotBlank() }
+                        if (hasValidAccounts && currentScreen != TvScreen.PLAYER) {
+                            try {
+                                val currentIds = mediaList.flatMap { item ->
+                                    if (item.type == MediaType.MOVIE) listOf(item.movieFile?.id ?: item.id)
+                                    else item.seasons.flatMap { s -> s.episodes.map { e -> e.fileId } }
+                                }.toSet()
+
+                                var foundNew = false
+                                for (acc in accounts) {
+                                    if (acc.accessToken.isBlank()) continue
+                                    val files = driveRepo.fetchVideoFiles(acc)
+                                    if (files.any { !currentIds.contains(it.id) }) {
+                                        foundNew = true
+                                        break
+                                    }
+                                }
+                                if (foundNew) {
+                                    // Silently refresh list preserving existing metadata
+                                    scanDrive()
+                                }
+                            } catch (_: Exception) {
+                                // Silent failure in background
+                            }
+                        }
+                    }
+                }
+
                 // Handle Back Button on TV Remote
                 BackHandler(enabled = currentScreen != TvScreen.HOME) {
                     when (currentScreen) {

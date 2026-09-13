@@ -1,8 +1,14 @@
 package com.drivetv.cinema.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -20,12 +26,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.drivetv.cinema.model.MediaItem
@@ -254,9 +263,27 @@ fun TvNavButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.10f else 1.0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "nav_scale"
+    )
+
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isFocused) 10.dp else 0.dp,
+        label = "nav_shadow"
+    )
+
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .zIndex(if (isFocused) 5f else 1f)
+            .scale(scale)
+            .shadow(
+                elevation = shadowElevation,
+                shape = RoundedCornerShape(10.dp),
+                spotColor = CinemaRose
+            )
+            .clip(RoundedCornerShape(10.dp))
             .background(
                 when {
                     isFocused -> Color.White
@@ -264,12 +291,20 @@ fun TvNavButton(
                     else -> CinemaSurface
                 }
             )
+            .border(
+                BorderStroke(
+                    if (isFocused) 2.dp else if (isSelected) 1.5.dp else 1.dp,
+                    if (isFocused) Color.White else if (isSelected) CinemaRoseBright else Color(0xFF27272A)
+                ),
+                RoundedCornerShape(10.dp)
+            )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Text(
             text = label,
@@ -289,16 +324,37 @@ fun TvIconButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.18f else 1.0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "icon_btn_scale"
+    )
+
+    val shadowElevation by animateDpAsState(
+        targetValue = if (isFocused) 12.dp else 0.dp,
+        label = "icon_btn_shadow"
+    )
+
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .zIndex(if (isFocused) 5f else 1f)
+            .scale(scale)
+            .size(38.dp)
+            .shadow(
+                elevation = shadowElevation,
+                shape = RoundedCornerShape(10.dp),
+                spotColor = Color.White
+            )
+            .clip(RoundedCornerShape(10.dp))
             .background(if (isFocused) Color.White else CinemaSurface)
             .border(
-                1.dp,
-                if (isFocused) Color.White else Color(0xFF27272A),
-                RoundedCornerShape(8.dp)
+                BorderStroke(
+                    if (isFocused) 2.5.dp else 1.dp,
+                    if (isFocused) Color.White else Color(0xFF27272A)
+                ),
+                RoundedCornerShape(10.dp)
             )
+            .focusable(interactionSource = interactionSource)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -310,7 +366,7 @@ fun TvIconButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = if (isFocused) CinemaBlack else Color.White,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(19.dp)
         )
     }
 }

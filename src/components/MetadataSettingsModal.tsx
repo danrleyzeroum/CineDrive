@@ -11,16 +11,26 @@ import {
   ExternalLink,
   ShieldCheck,
   Layers,
+  Clock,
+  Cloud,
+  Play,
 } from 'lucide-react';
-import { ScraperSettings } from '../types';
-import { loadScraperSettings, saveScraperSettings } from '../services/storageService';
+import { ScraperSettings, BackgroundSyncSettings } from '../types';
+import {
+  loadScraperSettings,
+  saveScraperSettings,
+  loadSyncSettings,
+  saveSyncSettings,
+} from '../services/storageService';
 
 interface MetadataSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRescrapeLibrary?: () => void;
   onTriggerFullRescrape?: () => void;
+  onTriggerBackgroundSync?: () => void;
   isScrapingActive?: boolean;
+  isBackgroundSyncing?: boolean;
 }
 
 export default function MetadataSettingsModal({
@@ -28,13 +38,16 @@ export default function MetadataSettingsModal({
   onClose,
   onRescrapeLibrary,
   onTriggerFullRescrape,
+  onTriggerBackgroundSync,
   isScrapingActive = false,
+  isBackgroundSyncing = false,
 }: MetadataSettingsModalProps) {
   if (!isOpen) return null;
 
   const triggerRescrape = onTriggerFullRescrape || onRescrapeLibrary;
 
   const [settings, setSettings] = useState<ScraperSettings>(() => loadScraperSettings());
+  const [syncSettings, setSyncSettings] = useState<BackgroundSyncSettings>(() => loadSyncSettings());
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isTestingKey, setIsTestingKey] = useState(false);
   const [keyTestStatus, setKeyTestStatus] = useState<'success' | 'error' | null>(null);
@@ -42,6 +55,7 @@ export default function MetadataSettingsModal({
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     saveScraperSettings(settings);
+    saveSyncSettings(syncSettings);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -276,6 +290,111 @@ export default function MetadataSettingsModal({
               </div>
               <Check className="w-4 h-4 text-emerald-400 shrink-0" />
             </div>
+          </div>
+
+          {/* Section: Cloud Database (Firestore) */}
+          <div className="p-4 rounded-2xl bg-neutral-950/80 border border-sky-900/30 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                  <Cloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-neutral-100">
+                      Banco de Dados na Nuvem (Firebase Firestore)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Conectado
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 mt-1 leading-relaxed">
+                    Salva automaticamente títulos traduzidos, capas em HD, sinopses em pt-BR, notas e identificações manuais na nuvem.
+                    <span className="text-sky-300 font-semibold"> Seus dados nunca são perdidos</span> ao re-escanear o Drive ou trocar de aparelho, e <span className="text-sky-300 font-semibold">não consomem memória local</span>.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1 text-[11px] text-neutral-400">
+              <span className="flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                Preservação automática em novas varreduras
+              </span>
+              <span className="text-neutral-500 font-mono text-[10px]">
+                Coleção: media_metadata
+              </span>
+            </div>
+          </div>
+
+          {/* Section: Background Periodic Sync */}
+          <div className="p-4 rounded-2xl bg-neutral-950/80 border border-neutral-800 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-neutral-100">
+                      Verificação Automática em Segundo Plano (Agendador)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Sem Interrupção
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 mt-1 leading-relaxed">
+                    Verifica periodicamente se você adicionou novos vídeos no Google Drive e atualiza o catálogo silenciosamente.
+                    <strong className="text-neutral-200"> Nunca interrompe a reprodução de filmes/séries nem tira o foco da tela.</strong>
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input
+                  type="checkbox"
+                  checked={syncSettings.enabled}
+                  onChange={(e) => setSyncSettings({ ...syncSettings, enabled: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+
+            {syncSettings.enabled && (
+              <div className="pt-2 border-t border-neutral-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-neutral-300">
+                    Intervalo de verificação:
+                  </span>
+                  <select
+                    value={syncSettings.intervalMinutes}
+                    onChange={(e) =>
+                      setSyncSettings({ ...syncSettings, intervalMinutes: Number(e.target.value) })
+                    }
+                    className="px-2.5 py-1 bg-neutral-900 border border-neutral-700 rounded-lg text-xs text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value={5}>A cada 5 minutos (Rápido)</option>
+                    <option value={15}>A cada 15 minutos (Recomendado)</option>
+                    <option value={30}>A cada 30 minutos</option>
+                    <option value={60}>A cada 1 hora</option>
+                  </select>
+                </div>
+
+                {onTriggerBackgroundSync && (
+                  <button
+                    type="button"
+                    disabled={isBackgroundSyncing}
+                    onClick={onTriggerBackgroundSync}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold transition-all flex items-center gap-1.5 border border-neutral-700"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isBackgroundSyncing ? 'animate-spin text-purple-400' : ''}`} />
+                    {isBackgroundSyncing ? 'Verificando em 2º plano...' : 'Verificar Agora'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Action: Re-scrape entire library */}

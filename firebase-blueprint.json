@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "mediaMetadata": {
+      "title": "MediaMetadata",
+      "description": "Enriched media metadata saved in the cloud",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "mediaKey": { "type": "string" },
+        "title": { "type": "string" },
+        "originalTitle": { "type": "string" },
+        "type": { "type": "string" },
+        "year": { "type": "string" },
+        "overview": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "backdropUrl": { "type": "string" },
+        "rating": { "type": "string" },
+        "quality": { "type": "string" },
+        "duration": { "type": "string" },
+        "director": { "type": "string" },
+        "tmdbId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "mediaKey", "title", "type"]
+    },
+    "watchProgress": {
+      "title": "WatchProgress",
+      "description": "Cross-device synced watch progress for movies and episodes",
+      "type": "object",
+      "properties": {
+        "mediaId": { "type": "string" },
+        "fileId": { "type": "string" },
+        "progressPercent": { "type": "number" },
+        "currentTimeSeconds": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "lastWatched": { "type": "number" },
+        "title": { "type": "string" },
+        "episodeInfo": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "accountEmail": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["mediaId", "fileId", "progressPercent", "currentTimeSeconds"]
+    }
+  },
+  "firestore": {
+    "/media_metadata/{mediaKey}": {
+      "schema": "mediaMetadata",
+      "description": "Persistent cloud storage for enriched media metadata so titles, posters, and synopses are never lost."
+    },
+    "/watch_progress/{progressKey}": {
+      "schema": "watchProgress",
+      "description": "Cross-device synchronized watch progress to stop on one device and resume on another."
+    }
+  }
+}

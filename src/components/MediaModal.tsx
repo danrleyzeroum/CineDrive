@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   X,
   Play,
@@ -16,6 +16,7 @@ import {
   Clapperboard,
 } from 'lucide-react';
 import { MediaItem, Episode, DriveAccount } from '../types';
+import { isVideoFile } from '../services/mediaParser';
 
 interface MediaModalProps {
   item: MediaItem | null;
@@ -43,7 +44,16 @@ export default function MediaModal({
 
   if (!item) return null;
 
-  const seasons = item.seasons || [];
+  // Filter out any non-video files (.nfo, .txt, etc.) from displayed seasons & episodes
+  const seasons = useMemo(() => {
+    return (item.seasons || [])
+      .map((s) => ({
+        ...s,
+        episodes: s.episodes.filter((ep) => isVideoFile(ep.rawFileName)),
+      }))
+      .filter((s) => s.episodes.length > 0);
+  }, [item]);
+
   const currentSeason = seasons.find((s) => s.seasonNumber === selectedSeason) || seasons[0] || null;
 
   return (
@@ -52,8 +62,9 @@ export default function MediaModal({
         {/* Close Button */}
         <button
           id="close-media-modal-btn"
+          tabIndex={0}
           onClick={onClose}
-          className="absolute top-4 right-4 z-30 p-2 rounded-full bg-black/60 hover:bg-neutral-800 text-white backdrop-blur-md transition-colors"
+          className="absolute top-4 right-4 z-30 p-2 rounded-full bg-black/70 hover:bg-neutral-800 focus-visible:bg-neutral-800 focus-visible:ring-4 focus-visible:ring-white focus-visible:outline-none text-white backdrop-blur-md transition-all"
         >
           <X className="w-5 h-5" />
         </button>
@@ -86,8 +97,9 @@ export default function MediaModal({
             {onOpenFixMatch && (
               <button
                 id="modal-fix-match-btn"
+                tabIndex={0}
                 onClick={() => onOpenFixMatch(item)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-rose-950 text-rose-300 border border-rose-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg hover:scale-105"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-rose-950 focus-visible:bg-rose-950 focus-visible:ring-4 focus-visible:ring-white focus-visible:outline-none text-rose-300 border border-rose-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg hover:scale-105 focus-visible:scale-105"
                 title="Identificar automaticamente no TMDb / Plex / Jellyfin Scraper"
               >
                 <Sparkles className="w-3.5 h-3.5 text-rose-400" />
@@ -98,8 +110,9 @@ export default function MediaModal({
             {onOpenCoverEditor && (
               <button
                 id="modal-change-cover-btn"
+                tabIndex={0}
                 onClick={() => onOpenCoverEditor(item)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-neutral-800 text-amber-300 border border-amber-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg hover:scale-105"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/75 hover:bg-neutral-800 focus-visible:bg-neutral-800 focus-visible:ring-4 focus-visible:ring-white focus-visible:outline-none text-amber-300 border border-amber-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg hover:scale-105 focus-visible:scale-105"
               >
                 <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
                 Alterar Capa
@@ -179,8 +192,9 @@ export default function MediaModal({
               {item.type === 'movie' && (
                 <button
                   id="play-movie-btn"
+                  tabIndex={0}
                   onClick={() => onPlayMovie(item)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-black font-black text-xs sm:text-sm shadow-xl hover:scale-105 transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 focus-visible:bg-amber-400 focus-visible:ring-4 focus-visible:ring-white focus-visible:outline-none text-black font-black text-xs sm:text-sm shadow-xl hover:scale-105 focus-visible:scale-105 transition-all"
                 >
                   <Play className="w-4 h-4 fill-black" />
                   Assistir Filme
@@ -190,8 +204,9 @@ export default function MediaModal({
               {item.type === 'series' && currentSeason?.episodes[0] && (
                 <button
                   id="play-first-episode-btn"
+                  tabIndex={0}
                   onClick={() => onPlayEpisode(currentSeason.episodes[0], item)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-black font-black text-xs sm:text-sm shadow-xl hover:scale-105 transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-neutral-200 focus-visible:bg-amber-400 focus-visible:ring-4 focus-visible:ring-white focus-visible:outline-none text-black font-black text-xs sm:text-sm shadow-xl hover:scale-105 focus-visible:scale-105 transition-all"
                 >
                   <Play className="w-4 h-4 fill-black" />
                   Assistir T{currentSeason.seasonNumber}:E{currentSeason.episodes[0].episodeNumber}
@@ -200,11 +215,12 @@ export default function MediaModal({
 
               <button
                 id="modal-favorite-btn"
+                tabIndex={0}
                 onClick={() => onToggleFavorite(item.id)}
-                className={`p-2.5 rounded-xl border transition-all ${
+                className={`p-2.5 rounded-xl border focus-visible:ring-4 focus-visible:ring-rose-500 focus-visible:outline-none transition-all ${
                   isFavorite
                     ? 'bg-rose-600/30 border-rose-500 text-rose-400'
-                    : 'bg-neutral-800 border-neutral-700 text-neutral-300 hover:text-white'
+                    : 'bg-neutral-800 border-neutral-700 text-neutral-300 hover:text-white focus-visible:text-white'
                 }`}
                 title={isFavorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
               >
@@ -313,17 +329,25 @@ export default function MediaModal({
                   <div
                     key={ep.id}
                     id={`episode-row-${ep.id}`}
+                    tabIndex={0}
+                    role="button"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onPlayEpisode(ep, item);
+                      }
+                    }}
                     onClick={() => onPlayEpisode(ep, item)}
-                    className="flex items-center justify-between p-3 rounded-xl bg-neutral-950/60 hover:bg-neutral-800/80 border border-neutral-800/60 transition-all cursor-pointer group"
+                    className="flex items-center justify-between p-3 rounded-xl bg-neutral-950/60 hover:bg-neutral-800/80 focus-visible:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none border border-neutral-800/60 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-neutral-900 group-hover:bg-amber-500 flex items-center justify-center text-neutral-400 group-hover:text-black transition-colors shrink-0">
+                      <div className="w-8 h-8 rounded-lg bg-neutral-900 group-hover:bg-amber-500 group-focus-visible:bg-amber-500 flex items-center justify-center text-neutral-400 group-hover:text-black group-focus-visible:text-black transition-colors shrink-0">
                         <Play className="w-3.5 h-3.5 ml-0.5 fill-current" />
                       </div>
 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-neutral-200 group-hover:text-amber-400 transition-colors">
+                          <span className="text-xs font-bold text-neutral-200 group-hover:text-amber-400 group-focus-visible:text-amber-400 transition-colors">
                             Ep. {ep.episodeNumber} - {ep.title}
                           </span>
                           <span

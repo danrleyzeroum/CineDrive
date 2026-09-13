@@ -9,10 +9,15 @@ import {
   AlertTriangle,
   Check,
   Subtitles,
+  Cloud,
+  RotateCcw,
+  Wifi,
+  Sliders,
 } from 'lucide-react';
-import { MediaItem, Episode, DriveAccount, WatchProgress, SubtitleTrack, SubtitleSettings } from '../types';
+import { MediaItem, Episode, DriveAccount, WatchProgress, SubtitleTrack, SubtitleSettings, PlaybackQuality } from '../types';
 import { getDrivePreviewUrl, getDriveDirectMediaUrl } from '../services/driveService';
-import { saveWatchProgress } from '../services/storageService';
+import { saveCloudWatchProgress } from '../services/cloudProgressService';
+import { loadNetworkSettings, saveNetworkSettings } from '../services/networkSettingsService';
 import SubtitleSelectorModal from './SubtitleSelectorModal';
 
 interface VideoPlayerModalProps {
@@ -42,6 +47,17 @@ function loadSavedSubtitleSettings(): SubtitleSettings {
   return DEFAULT_SUBTITLE_SETTINGS;
 }
 
+function formatDuration(seconds: number): string {
+  if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function VideoPlayerModal({
   media,
   episode,
@@ -59,11 +75,26 @@ export default function VideoPlayerModal({
   const [showDriveNotice, setShowDriveNotice] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Cross-device Firebase Watch Progress sync state
+  const [hasCloudSynced, setHasCloudSynced] = useState(false);
+  const [showResumeNotice, setShowResumeNotice] = useState(() =>
+    Boolean(initialProgress && initialProgress.currentTimeSeconds > 10)
+  );
+  const lastSyncTimeRef = useRef<number>(0);
+  const currentTimeRef = useRef<number>(0);
+  const durationRef = useRef<number>(0);
+
   // Subtitle state
   const [isSubtitleModalOpen, setIsSubtitleModalOpen] = useState(false);
   const [activeSubtitleTrack, setActiveSubtitleTrack] = useState<SubtitleTrack | null>(null);
   const [subtitleSettings, setSubtitleSettings] = useState<SubtitleSettings>(() => loadSavedSubtitleSettings());
   const [currentTime, setCurrentTime] = useState(0);
+
+  // Network & Playback Quality State
+  const [playbackQuality, setPlaybackQuality] = useState<PlaybackQuality>(
+    () => loadNetworkSettings().defaultQuality
+  );
+  const [isQualityMenuOpen, setIsQualityMenuOpen] = useState(false);
 
   const fileId = episode ? episode.fileId : media.movieFile?.id || '';
   const accountId = episode ? episode.accountId : media.movieFile?.accountId || '';
@@ -79,6 +110,37 @@ export default function VideoPlayerModal({
 
   const previewUrl = getDrivePreviewUrl(fileId);
   const directUrl = accessToken ? getDriveDirectMediaUrl(fileId, accessToken) : '';
+
+  // Synchronize progress to Firebase Firestore & local cache
+  const syncProgress = (time: number, duration: number) => {
+    if (!duration || duration <= 0) return;
+    const percent = Math.min(100, (time / duration) * 100);
+    saveCloudWatchProgress(
+      {
+        mediaId: media.id,
+        fileId,
+        progressPercent: percent,
+        currentTimeSeconds: time,
+        durationSeconds: duration,
+        lastWatched: Date.now(),
+        title: media.title,
+        episodeInfo: episode ? `T${episode.seasonNumber}:E${episode.episodeNumber}` : undefined,
+        posterUrl: media.posterUrl,
+        accountEmail: account?.email,
+      },
+      account?.email
+    );
+    setHasCloudSynced(true);
+  };
+
+  // Sync on unmount/exit with final timestamp
+  useEffect(() => {
+    return () => {
+      if (currentTimeRef.current > 0 && durationRef.current > 0) {
+        syncProgress(currentTimeRef.current, durationRef.current);
+      }
+    };
+  }, [fileId, media.id]);
 
   // Persist subtitle settings
   const handleUpdateSubtitleSettings = (newSettings: SubtitleSettings) => {
@@ -113,28 +175,38 @@ export default function VideoPlayerModal({
     }
   }, [playerMode, initialProgress]);
 
-  // Track watch progress & current time for subtitles
+  // Track watch progress & current time for subtitles with cloud throttling
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       const current = videoRef.current.currentTime;
+      const duration = videoRef.current.duration;
+      currentTimeRef.current = current;
+      durationRef.current = duration;
       setCurrentTime(current);
 
-      const duration = videoRef.current.duration;
       if (duration && duration > 0) {
-        const percent = (current / duration) * 100;
-        saveWatchProgress({
-          mediaId: media.id,
-          fileId,
-          progressPercent: percent,
-          currentTimeSeconds: current,
-          durationSeconds: duration,
-          lastWatched: Date.now(),
-          title: media.title,
-          episodeInfo: episode ? `T${episode.seasonNumber}:E${episode.episodeNumber}` : undefined,
-          posterUrl: media.posterUrl,
-        });
+        const now = Date.now();
+        // Sync to cloud every 5 seconds
+        if (now - lastSyncTimeRef.current > 5000) {
+          lastSyncTimeRef.current = now;
+          syncProgress(current, duration);
+        }
       }
     }
+  };
+
+  const handlePause = () => {
+    if (currentTimeRef.current > 0 && durationRef.current > 0) {
+      syncProgress(currentTimeRef.current, durationRef.current);
+    }
+  };
+
+  const handleRestartFromBeginning = () => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
+    setShowResumeNotice(false);
+    syncProgress(0, durationRef.current || 1);
   };
 
   // Listen for Escape key
@@ -206,6 +278,12 @@ export default function VideoPlayerModal({
 
         {/* Player Controls & Switches */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Cloud Sync Status Badge */}
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 text-[11px] font-medium">
+            <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sincronização Nuvem Ativa</span>
+          </div>
+
           {/* Subtitles Button */}
           <button
             id="player-subtitles-btn"
@@ -225,6 +303,44 @@ export default function VideoPlayerModal({
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
             )}
           </button>
+
+          {/* Network & Playback Quality Dropdown (Auto / 1080p / 720p / 480p) */}
+          <div className="relative">
+            <button
+              id="player-quality-btn"
+              onClick={() => setIsQualityMenuOpen(!isQualityMenuOpen)}
+              className="px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-bold text-amber-400 flex items-center gap-1.5 transition-all"
+              title="Qualidade de Reprodução de Rede"
+            >
+              <Wifi className="w-3.5 h-3.5" />
+              <span className="uppercase">{playbackQuality}</span>
+            </button>
+
+            {isQualityMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-36 py-1.5 rounded-xl bg-neutral-900 border border-neutral-700 shadow-2xl z-50 animate-in fade-in zoom-in-95">
+                <div className="px-3 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                  Qualidade TV
+                </div>
+                {(['auto', '1080p', '720p', '480p'] as PlaybackQuality[]).map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => {
+                      setPlaybackQuality(q);
+                      setIsQualityMenuOpen(false);
+                      const currentCfg = loadNetworkSettings();
+                      saveNetworkSettings({ ...currentCfg, defaultQuality: q });
+                    }}
+                    className={`w-full px-3 py-1.5 text-xs text-left font-semibold flex items-center justify-between hover:bg-neutral-800 transition-colors ${
+                      playbackQuality === q ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-300'
+                    }`}
+                  >
+                    <span className="uppercase">{q}</span>
+                    {playbackQuality === q && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Previous / Next Episode buttons */}
           {episode && (
@@ -289,6 +405,38 @@ export default function VideoPlayerModal({
 
       {/* Main Video Viewport */}
       <div className="relative flex-1 w-full bg-black flex items-center justify-center overflow-hidden">
+        {/* Floating Cloud Resume Notification Banner */}
+        {showResumeNotice && initialProgress && initialProgress.currentTimeSeconds > 10 && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-2xl bg-neutral-900/95 border border-amber-500/50 shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-2">
+            <Cloud className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="text-xs text-neutral-200">
+              Continuando de onde você parou:{' '}
+              <strong className="text-amber-300 font-bold">
+                {formatDuration(initialProgress.currentTimeSeconds)}
+              </strong>{' '}
+              ({Math.round(initialProgress.progressPercent)}%)
+            </span>
+            {playerMode === 'native' && (
+              <button
+                type="button"
+                onClick={handleRestartFromBeginning}
+                className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 font-semibold px-2 py-0.5 rounded bg-amber-950/60 border border-amber-500/30 transition-all active:scale-95"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Reiniciar
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowResumeNotice(false)}
+              className="p-1 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-white"
+              title="Dispensar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {playerMode === 'drive' ? (
           <iframe
             id="drive-video-iframe"
@@ -309,6 +457,8 @@ export default function VideoPlayerModal({
                   controls
                   autoPlay
                   onTimeUpdate={handleTimeUpdate}
+                  onPause={handlePause}
+                  onEnded={handlePause}
                   onError={() => {
                     setShowDriveNotice(true);
                     setPlayerMode('drive');

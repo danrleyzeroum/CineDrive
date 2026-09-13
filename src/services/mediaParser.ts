@@ -1,5 +1,98 @@
 import { DriveRawFile, MediaItem, Episode } from '../types';
 
+// Valid video file extensions (mkv, mp4, avi, webm, mov, etc.)
+export const VALID_VIDEO_EXTENSIONS = new Set([
+  'mkv', 'mp4', 'm4v', 'avi', 'mov', 'wmv', 'webm', 'flv', 'ts', 'm2ts', 'mts',
+  'vob', 'ogv', '3gp', '3g2', 'divx', 'rmvb', 'rm', 'f4v', 'asf'
+]);
+
+// Non-video files that must NEVER be listed as playable media or episodes (.nfo, .txt, subtitles, posters, torrents, etc.)
+export const NON_VIDEO_EXTENSIONS = new Set([
+  'nfo', 'txt', 'srt', 'vtt', 'sub', 'idx', 'ass', 'ssa', 'smi',
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tbn', 'ico',
+  'torrent', 'url', 'website', 'webloc', 'lnk', 'desktop',
+  'xml', 'json', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'log', 'md',
+  'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'iso',
+  'exe', 'bat', 'cmd', 'sh', 'apk', 'bin',
+  'mp3', 'flac', 'aac', 'wav', 'm4a', 'ogg', 'wma', 'opus'
+]);
+
+/**
+ * Checks whether a given filename or MIME type represents a valid playable video file.
+ * Strictly rejects .nfo, .txt, subtitle files, images, torrents, and archives.
+ */
+export function isVideoFile(fileName?: string, mimeType?: string): boolean {
+  if (!fileName || typeof fileName !== 'string') return false;
+
+  const cleanName = fileName.trim().toLowerCase();
+  const lastDotIndex = cleanName.lastIndexOf('.');
+  if (lastDotIndex === -1) {
+    // If there is no extension, only accept if mimeType is explicitly a video/
+    return Boolean(mimeType && mimeType.startsWith('video/'));
+  }
+
+  const ext = cleanName.substring(lastDotIndex + 1);
+
+  // 1. Immediate rejection of blacklisted non-video extensions (.nfo, .txt, .srt, etc.)
+  if (NON_VIDEO_EXTENSIONS.has(ext)) {
+    return false;
+  }
+
+  // 2. Acceptance of whitelisted video extensions (.mkv, .mp4, .avi, etc.)
+  if (VALID_VIDEO_EXTENSIONS.has(ext)) {
+    return true;
+  }
+
+  // 3. Fallback to MIME type if Google Drive recognized it as a video and not in blacklist
+  if (mimeType && mimeType.startsWith('video/')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Cleans an existing MediaItem (from cache, cloud database, or memory) to ensure
+ * that any non-video files (.nfo, .txt, etc.) are purged from its seasons and episodes.
+ */
+export function cleanMediaItemOfNonVideos(item: MediaItem): MediaItem | null {
+  if (!item) return null;
+
+  if (item.type === 'movie') {
+    // If it has a movieFile reference and it's not a video, discard
+    if (item.movieFile && !isVideoFile(item.movieFile.name, item.movieFile.mimeType)) {
+      return null;
+    }
+    return item;
+  }
+
+  // For series: purge any non-video episodes (.nfo, .txt, etc.)
+  if (item.type === 'series') {
+    const rawSeasons = item.seasons || [];
+    const cleanedSeasons = rawSeasons
+      .map((s) => ({
+        ...s,
+        episodes: s.episodes.filter((ep) => isVideoFile(ep.rawFileName)),
+      }))
+      .filter((s) => s.episodes.length > 0);
+
+    const totalVideoEpisodes = cleanedSeasons.reduce((acc, s) => acc + s.episodes.length, 0);
+
+    // If all files in this series were .nfo or non-videos, return null so it doesn't clutter the catalog
+    if (totalVideoEpisodes === 0 && rawSeasons.length > 0) {
+      return null;
+    }
+
+    return {
+      ...item,
+      seasons: cleanedSeasons,
+      totalEpisodes: totalVideoEpisodes,
+    };
+  }
+
+  return item;
+}
+
 interface ParsedFile {
   isSeries: boolean;
   cleanTitle: string;
@@ -139,8 +232,12 @@ function cleanNoise(text: string): string {
 
 /**
  * Groups a raw list of Drive files across both accounts into categorized Movies and Series.
+ * Strictly filters out non-video files (.nfo, .txt, .srt, posters, etc.).
  */
 export function groupFilesIntoMediaItems(files: DriveRawFile[]): MediaItem[] {
+  // 1. Filter out all non-video files (.nfo, .txt, subtitle files, posters, etc.)
+  const videoFiles = files.filter((file) => isVideoFile(file.name, file.mimeType));
+
   const seriesMap = new Map<string, {
     cleanTitle: string;
     seasons: Map<number, Episode[]>;
@@ -151,7 +248,7 @@ export function groupFilesIntoMediaItems(files: DriveRawFile[]): MediaItem[] {
 
   const movies: MediaItem[] = [];
 
-  for (const file of files) {
+  for (const file of videoFiles) {
     const parsed = parseMediaFileName(file.name);
 
     if (parsed.isSeries) {
@@ -207,9 +304,24 @@ export function groupFilesIntoMediaItems(files: DriveRawFile[]): MediaItem[] {
       }
     } else {
       // Movie
+      const movieId = `movie-${file.id}`;
+      const existingMovie = movies.find((m) => m.id === movieId);
       const accountColor = file.accountLabel.includes('2') ? 'purple' : 'blue';
+
+      if (existingMovie) {
+        // If the exact same movie file was found across both accounts or folders, merge the account label instead of duplicating the item
+        if (!existingMovie.accounts.some((acc) => acc.accountId === file.accountId)) {
+          existingMovie.accounts.push({
+            accountId: file.accountId,
+            accountLabel: file.accountLabel,
+            color: accountColor,
+          });
+        }
+        continue;
+      }
+
       const movieItem: MediaItem = {
-        id: `movie-${file.id}`,
+        id: movieId,
         title: parsed.cleanTitle,
         cleanTitle: parsed.cleanTitle,
         type: 'movie',
@@ -237,13 +349,13 @@ export function groupFilesIntoMediaItems(files: DriveRawFile[]): MediaItem[] {
     // Sort seasons
     const sortedSeasonNumbers = Array.from(item.seasons.keys()).sort((a, b) => a - b);
     const seasons = sortedSeasonNumbers.map((sNum) => {
-      const episodes = item.seasons.get(sNum) || [];
+      const episodes = (item.seasons.get(sNum) || []).filter((ep) => isVideoFile(ep.rawFileName));
       episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
       return {
         seasonNumber: sNum,
         episodes,
       };
-    });
+    }).filter((s) => s.episodes.length > 0);
 
     const totalEpisodes = seasons.reduce((acc, s) => acc + s.episodes.length, 0);
     // Find representative poster
@@ -273,9 +385,21 @@ export function groupFilesIntoMediaItems(files: DriveRawFile[]): MediaItem[] {
       seasons,
       totalEpisodes,
     };
-  });
+  }).filter((series) => (series.totalEpisodes ?? 0) > 0);
 
-  return [...seriesItems, ...movies];
+  // Strict deduplication by ID across movies and series
+  const allMedia = [...seriesItems, ...movies];
+  const uniqueItems: MediaItem[] = [];
+  const seenIds = new Set<string>();
+
+  for (const item of allMedia) {
+    if (item && item.id && !seenIds.has(item.id)) {
+      seenIds.add(item.id);
+      uniqueItems.push(item);
+    }
+  }
+
+  return uniqueItems;
 }
 
 export function formatBytes(bytesStr?: string): string {

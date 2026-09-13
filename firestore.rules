@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Cloud media metadata: persists enriched titles, covers, synopses, and ratings in the cloud
+    match /media_metadata/{mediaKey} {
+      allow read: if true;
+      allow write: if request.resource.data.title is string &&
+                      request.resource.data.type in ['movie', 'series'];
+    }
+
+    // Cross-device Watch Progress synchronization
+    match /watch_progress/{progressKey} {
+      allow read: if true;
+      allow write: if request.resource.data.mediaId is string &&
+                      request.resource.data.fileId is string;
+    }
+  }
+}

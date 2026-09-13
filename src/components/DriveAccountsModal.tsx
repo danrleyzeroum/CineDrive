@@ -29,8 +29,20 @@ export default function DriveAccountsModal({
 
   if (!isOpen) return null;
 
-  const drive1 = accounts[0] || null;
-  const drive2 = accounts[1] || null;
+  // Accurately map each drive to its corresponding slot
+  const drive1 =
+    accounts.find((a) => a.id.startsWith('drive_slot_1') || a.label.includes('Drive 1')) ||
+    (accounts.length > 0 && !accounts[0].label.includes('Drive 2') && !accounts[0].id.startsWith('drive_slot_2')
+      ? accounts[0]
+      : null);
+
+  const drive2 =
+    accounts.find((a) => a.id.startsWith('drive_slot_2') || a.label.includes('Drive 2')) ||
+    (accounts.length > 1 && accounts[1] !== drive1
+      ? accounts[1]
+      : accounts.length === 1 && accounts[0] !== drive1
+      ? accounts[0]
+      : null);
 
   const handleSync = async (account: DriveAccount) => {
     try {
@@ -76,6 +88,34 @@ export default function DriveAccountsModal({
             <div>
               <span className="font-semibold">Seleção de Pasta:</span> Você pode escolher uma pasta específica em cada Drive (ex: <i>&ldquo;Filmes&rdquo;</i> ou <i>&ldquo;Series&rdquo;</i>). O app buscará todos os vídeos contidos nela e em suas subpastas automaticamente!
             </div>
+          </div>
+
+          {/* Same account tip */}
+          <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-800/40 text-blue-200 text-xs flex items-start gap-2.5">
+            <span className="text-base shrink-0 mt-0.5">📂</span>
+            <div className="space-y-1 text-[11px] leading-relaxed">
+              <span className="font-bold text-blue-300">Dica: Você pode usar a MESMA conta Google no Drive 1 e no Drive 2!</span>
+              <p className="text-neutral-300">
+                Por exemplo: conecte seu e-mail no <strong>Drive 1</strong> e escolha a pasta <span className="text-amber-400 font-semibold">&ldquo;Filmes&rdquo;</span>. Em seguida, conecte a mesma conta no <strong>Drive 2</strong> e escolha a pasta <span className="text-amber-400 font-semibold">&ldquo;Séries&rdquo;</span>. O app varrerá ambas as pastas e unificará tudo na sua tela inicial!
+              </p>
+            </div>
+          </div>
+
+          {/* Google OAuth Help Notice (App em desenvolvimento) */}
+          <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/40 text-amber-200 text-xs space-y-2">
+            <div className="flex items-center gap-2 font-bold text-amber-300">
+              <span className="text-base">💡</span>
+              <span>Apareceu &ldquo;App em desenvolvimento / Fale com o desenvolvedor&rdquo; no Google?</span>
+            </div>
+            <p className="text-[11px] text-amber-300/80 leading-relaxed">
+              Como o projeto Google Cloud foi criado recentemente, o Google exige que outros e-mails sejam adicionados como <strong>Usuários de Teste</strong> ou que o app seja colocado em modo de <strong>Produção</strong>:
+            </p>
+            <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-200/90 pl-1 font-mono">
+              <li>Acesse o <strong>Google Cloud Console</strong> &gt; <strong>Tela de consentimento OAuth</strong>.</li>
+              <li>Na seção <strong>&ldquo;Usuários de teste&rdquo; (Test users)</strong>, clique em <strong>+ ADD USERS</strong>.</li>
+              <li>Adicione o seu segundo e-mail Gmail e clique em <strong>Salvar</strong>.</li>
+              <li>(Ou clique no botão <strong>&ldquo;PUBLICAR APLICATIVO&rdquo;</strong> para liberar qualquer conta).</li>
+            </ol>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

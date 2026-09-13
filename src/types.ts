@@ -84,6 +84,8 @@ export interface MediaItem {
   tagline?: string;
   imdbId?: string;
   tmdbId?: string | number;
+  trailerKey?: string;
+  trailerUrl?: string;
 }
 
 export interface ScraperSettings {
@@ -103,6 +105,7 @@ export interface WatchProgress {
   title: string;
   episodeInfo?: string;
   posterUrl?: string;
+  accountEmail?: string;
 }
 
 export interface DriveFolder {
@@ -141,4 +144,42 @@ export interface SubtitleSettings {
   textColor: 'white' | 'yellow';
   backgroundColor: 'semi' | 'solid' | 'none';
 }
+
+export interface CloudMediaMetadata {
+  id: string;
+  mediaKey: string;
+  title: string;
+  originalTitle?: string;
+  type: 'movie' | 'series';
+  year?: string;
+  overview?: string;
+  posterUrl?: string;
+  backdropUrl?: string;
+  rating?: string;
+  genres?: string[];
+  quality?: string;
+  duration?: string;
+  director?: string;
+  cast?: string[];
+  tmdbId?: string;
+  updatedAt: string;
+}
+
+export interface BackgroundSyncSettings {
+  enabled: boolean;
+  intervalMinutes: number; // 5, 15, 30, 60
+  lastSyncTime?: number;
+  notifyOnNewMedia: boolean;
+  cloudDatabaseEnabled: boolean;
+}
+
+export type PlaybackQuality = 'auto' | '480p' | '720p' | '1080p';
+
+export interface NetworkSettings {
+  defaultQuality: PlaybackQuality;
+  dataSaverEnabled: boolean;
+  preloadThumbnails: boolean;
+  bufferSizeSeconds: number;
+}
+
 
