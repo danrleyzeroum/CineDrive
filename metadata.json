@@ -1,0 +1,6 @@
+{
+  "name": "Drive Cinema",
+  "description": "Aplicativo de streaming e catálogo unificado de filmes e séries do Google Drive com busca automática de capas, sinopses e detalhes em português brasileiro.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

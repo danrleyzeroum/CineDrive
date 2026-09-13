@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cinema_black">#0A0A0B</color>
+    <color name="cinema_surface">#141416</color>
+    <color name="cinema_card">#1C1C20</color>
+    <color name="cinema_rose">#E11D48</color>
+    <color name="cinema_rose_bright">#F43F5E</color>
+    <color name="cinema_accent">#38BDF8</color>
+    <color name="cinema_text_white">#F8FAFC</color>
+    <color name="cinema_text_gray">#94A3B8</color>
+    <color name="cinema_focus_border">#FFFFFF</color>
+</resources>

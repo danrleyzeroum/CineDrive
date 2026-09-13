@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Drive Cinema TV</string>
+    <string name="movies">Filmes</string>
+    <string name="series">Séries</string>
+    <string name="all_media">Todos os Títulos</string>
+    <string name="settings">Configurações</string>
+    <string name="subtitles">Legendas (.srt / .vtt)</string>
+    <string name="audio_tracks">Áudio</string>
+    <string name="play">Assistir Agora</string>
+    <string name="resume">Continuar de onde parou</string>
+    <string name="synopsis">Sinopse</string>
+    <string name="episodes">Episódios</string>
+    <string name="season">Temporada</string>
+    <string name="scan_drive">Escanear Google Drive</string>
+</resources>
