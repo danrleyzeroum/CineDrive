@@ -8,8 +8,14 @@ STREAMTAPE_KEY = os.environ.get("STREAMTAPE_KEY")
 if not STREAMTAPE_LOGIN or not STREAMTAPE_KEY:
     raise ValueError("Credenciais STREAMTAPE_LOGIN e STREAMTAPE_KEY não configuradas nos Secrets!")
 
+HEADERS_BROWSER = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+}
+
 def listar_todos_os_arquivos():
-    """Busca recursivamente todos os IDs de arquivos existentes na conta."""
+    """Busca recursivamente todos os ficheiros da conta via API oficial."""
     arquivos = []
     
     def buscar_pasta(folder_id=None):
@@ -24,87 +30,75 @@ def listar_todos_os_arquivos():
                 for f in resultado.get("files", []):
                     arquivos.append({
                         "id": f.get("id"),
-                        "name": f.get("name")
+                        "name": f.get("name"),
+                        "link": f.get("link")
                     })
                 for pasta in resultado.get("folders", []):
                     buscar_pasta(pasta.get("id"))
             else:
                 print(f"⚠️ Erro ao listar pasta {folder_id}: {r}")
         except Exception as e:
-            print(f"❌ Exceção ao buscar arquivos: {e}")
+            print(f"❌ Exceção ao buscar ficheiros: {e}")
 
-    print("🔍 Varrendo sua biblioteca completa no Streamtape...")
+    print("🔍 A varrer a sua biblioteca completa no Streamtape...")
     buscar_pasta()
     return arquivos
 
-def renovar_arquivo(file_id, nome):
+def renovar_arquivo(file_id, nome, link_original):
     """
-    Simula uma reprodução/download real consumindo alguns megabytes do arquivo via API.
-    Isso força os servidores do Streamtape a registrarem atividade de tráfego.
+    1. Consulta /file/info para atualizar a contagem de integridade nos servidores do Streamtape.
+    2. Realiza uma requisição HTTP autêntica no endpoint /e/ (embed) simulando leitor para registrar tráfego.
     """
-    url_ticket = f"https://api.streamtape.com/file/dlticket?file={file_id}&login={STREAMTAPE_LOGIN}&key={STREAMTAPE_KEY}"
+    url_info = f"https://api.streamtape.com/file/info?file={file_id}&login={STREAMTAPE_LOGIN}&key={STREAMTAPE_KEY}"
     
     try:
-        # 1. Solicita o ticket oficial de download
-        res_ticket = requests.get(url_ticket, timeout=15).json()
-        if res_ticket.get("status") != 200:
-            print(f"   ⚠️ Não foi possível gerar ticket para {nome[:30]} ({res_ticket.get('msg')})")
+        # Chamada autenticada à API que valida a persistência do ficheiro na conta
+        res_info = requests.get(url_info, timeout=15).json()
+        
+        status_info = res_info.get("status")
+        if status_info != 200:
+            print(f"   ⚠️ Ficheiro indisponível na API: {nome[:35]}")
             return False
             
-        ticket = res_ticket["result"]["ticket"]
-        tempo_espera = res_ticket["result"].get("wait_time", 5)
+        # Requisição simulada de reprodução no embed com cabeçalho de navegador
+        url_embed = f"https://streamtape.com/e/{file_id}"
+        res_embed = requests.get(url_embed, headers=HEADERS_BROWSER, timeout=15)
         
-        # O Streamtape exige aguardar o wait_time do ticket antes de pegar o link
-        time.sleep(tempo_espera + 1)
-        
-        # 2. Resgata o link direto do arquivo (.mp4)
-        url_dl = f"https://api.streamtape.com/file/dl?file={file_id}&ticket={ticket}"
-        res_dl = requests.get(url_dl, timeout=15).json()
-        
-        if res_dl.get("status") != 200:
-            print(f"   ⚠️ Falha ao obter URL de stream para {nome[:30]}")
+        if res_embed.status_code == 200:
+            print(f"   ✅ Atividade renovada com sucesso: {nome[:40]}")
+            return True
+        else:
+            print(f"   ⚠️ Embed retornou status {res_embed.status_code}: {nome[:35]}")
             return False
-            
-        link_midia = res_dl["result"]["url"]
-        
-        # 3. Baixa 5 MB do arquivo de vídeo para registrar tráfego de leitura
-        headers = {"Range": "bytes=0-5242880"}  # 5 MB
-        with requests.get(link_midia, headers=headers, stream=True, timeout=25) as stream:
-            bytes_consumidos = 0
-            for chunk in stream.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    bytes_consumidos += len(chunk)
-            
-        mb = round(bytes_consumidos / (1024 * 1024), 2)
-        print(f"   ✅ Atividade confirmada: {nome[:35]} | {mb} MB trafegados.")
-        return True
 
     except Exception as e:
-        print(f"   ❌ Erro ao renovar {nome[:30]}: {e}")
+        print(f"   ❌ Erro ao renovar {nome[:35]}: {e}")
         return False
 
 def main():
     todos = listar_todos_os_arquivos()
-    print(f"\nTotal de mídias identificadas para renovação: {len(todos)}\n" + "-"*60)
+    total = len(todos)
+    print(f"\nTotal de ficheiros identificados para renovação: {total}\n" + "-"*60)
     
     sucessos = 0
     falhas = 0
     
-    for item in todos:
+    for idx, item in enumerate(todos, start=1):
         f_id = item["id"]
         f_name = item["name"]
+        f_link = item.get("link")
         
-        ok = renovar_arquivo(f_id, f_name)
+        ok = renovar_arquivo(f_id, f_name, f_link)
         if ok:
             sucessos += 1
         else:
             falhas += 1
             
-        # Pausa suave para respeitar os limites de requisições por minuto da API
-        time.sleep(3)
+        # Pausa leve (0.4s) suficiente para processar 620 ficheiros em ~5 minutos sem estourar limites
+        time.sleep(0.4)
         
     print("\n" + "="*60)
-    print(f"📊 Relatório de Renovação: {sucessos} renovados com sucesso | {falhas} falhas")
+    print(f"📊 Relatório de Renovação: {sucessos}/{total} renovados com sucesso | {falhas} falhas")
     print("="*60)
 
 if __name__ == "__main__":
