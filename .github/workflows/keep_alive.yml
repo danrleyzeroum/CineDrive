@@ -1,0 +1,31 @@
+name: Streamtape Anti-Expiration Real Traffic
+
+on:
+  schedule:
+    # Executa toda segunda e quinta-feira às 06:00 UTC
+    - cron: '0 6 * * 1,4'
+  workflow_dispatch: # Permite que você clique em "Run workflow" manualmente quando quiser
+
+jobs:
+  renew-traffic:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Baixar código do repositório
+      uses: actions/checkout@v4
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Instalar dependências
+      run: |
+        pip install requests
+
+    - name: Executar renovação de tráfego oficial
+      env:
+        STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
+        STREAMTAPE_KEY: ${{ secrets.STREAMTAPE_KEY }}
+      run: |
+        python keep_alive.py
